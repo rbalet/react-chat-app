@@ -16,7 +16,7 @@ import { deserializePreKeyBundle, type SerializedPreKeyBundle } from './x3dh/pre
 import { startSession } from './session/session-builder';
 import { SessionCipher } from './session/session-cipher';
 import { DEFAULT_PREKEY_BATCH_SIZE } from './core/constants';
-import { bytesToBase64 } from './core/utils';
+import { base64ToBytes, bytesToBase64 } from './core/utils';
 import type { EncryptedMessage } from './core/types';
 import type { SignalProtocolStore } from './store/store-interface';
 import { SenderKeyState } from './sender-keys/sender-key-state';
@@ -197,21 +197,31 @@ export class SignalProtocolManager {
   /** Get a SenderKeyDistributionMessage (SKDM) for this user's current key. */
   async getSenderKeyDistribution(groupId: string): Promise<SerializedSKDM> {
     return this.runGroupExclusive(groupId, async () => {
+      const id = await this.store.getIdentityKeyPair();
+      if (!id) throw new Error('No identity key — call initialize() first');
       const cipher = new GroupCipher(this.store, groupId);
-      return cipher.getDistributionMessage(this.userId);
+      return cipher.getDistributionMessage(this.userId, id.ed.privateKey, id.ed.publicKey);
     });
   }
 
-  /** Process an SKDM received from another sender — verifies the signature
-   *  and stores the sender key state for future decrypts. */
+  /** Process an SKDM received from another sender — verifies the identity-key
+   *  signature against the stored remote identity, then stores the sender key
+   *  state for future group message decryption. */
   async processSenderKeyDistribution(
     groupId: string,
     senderId: string,
     skdm: SerializedSKDM,
   ): Promise<void> {
     return this.runGroupExclusive(groupId, async () => {
+      // Fetch the sender's previously-stored identity public key (TOFU).
+      // If unseen, trust-on-first-use: store it now from the SKDM payload.
+      let identityKey = await this.store.getRemoteIdentity(senderId);
+      if (!identityKey) {
+        identityKey = base64ToBytes(skdm.identityKey);
+        await this.store.saveRemoteIdentity(senderId, identityKey);
+      }
       const cipher = new GroupCipher(this.store, groupId);
-      return cipher.processDistributionMessage(senderId, skdm);
+      return cipher.processDistributionMessage(senderId, skdm, identityKey);
     });
   }
 
@@ -235,8 +245,10 @@ export class SignalProtocolManager {
    *  new SKDM for redistribution to remaining members. */
   async rotateSenderKey(groupId: string): Promise<SerializedSKDM> {
     return this.runGroupExclusive(groupId, async () => {
+      const id = await this.store.getIdentityKeyPair();
+      if (!id) throw new Error('No identity key — call initialize() first');
       const cipher = new GroupCipher(this.store, groupId);
-      return cipher.rotate(this.userId);
+      return cipher.rotate(this.userId, id.ed.privateKey, id.ed.publicKey);
     });
   }
 }

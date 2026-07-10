@@ -45,8 +45,8 @@ describe('SenderKeyState', () => {
       const p1 = state.advance();
       const p2 = state.advance();
 
-      expect(p1.key).not.toEqual(p2.key);
-      expect(p1.nonce).not.toEqual(p2.nonce);
+      expect(p1.params.key).not.toEqual(p2.params.key);
+      expect(p1.params.nonce).not.toEqual(p2.params.nonce);
     });
 
     it('mutates the chain key after each advance', () => {
@@ -67,11 +67,11 @@ describe('SenderKeyState', () => {
       const serialized = original.serialize();
       const restored = SenderKeyState.deserialize(serialized);
 
-      const origParams = original.advance();
-      const restParams = restored.advance();
+      const origResult = original.advance();
+      const restResult = restored.advance();
 
-      expect(restParams.key).toEqual(origParams.key);
-      expect(restParams.nonce).toEqual(origParams.nonce);
+      expect(restResult.params.key).toEqual(origResult.params.key);
+      expect(restResult.params.nonce).toEqual(origResult.params.nonce);
     });
 
     it('preserves the distributionId across round-trip', () => {
@@ -97,7 +97,8 @@ describe('SenderKeyDistributionMessage', () => {
   describe('createSKDM', () => {
     it('produces a valid SKDM with all required fields', () => {
       const state = SenderKeyState.create();
-      const skdm = createSKDM('alice', state);
+      const identity = generateSigningKeyPair();
+      const skdm = createSKDM('alice', state, identity.privateKey, identity.publicKey);
 
       expect(skdm.senderId).toBe('alice');
       expect(skdm.distributionId).toBe(state.distributionId);
@@ -113,41 +114,38 @@ describe('SenderKeyDistributionMessage', () => {
   describe('verifySKDM', () => {
     it('returns true for a valid SKDM', () => {
       const state = SenderKeyState.create();
-      const skdm = createSKDM('alice', state);
-      expect(verifySKDM(skdm)).toBe(true);
+      const identity = generateSigningKeyPair();
+      const skdm = createSKDM('alice', state, identity.privateKey, identity.publicKey);
+      expect(verifySKDM(skdm, identity.publicKey)).toBe(true);
     });
 
     it('returns false for an SKDM with a tampered chainKey byte', () => {
       const state = SenderKeyState.create();
-      const skdm = createSKDM('alice', state);
+      const identity = generateSigningKeyPair();
+      const skdm = createSKDM('alice', state, identity.privateKey, identity.publicKey);
 
       const ck = base64ToBytes(skdm.chainKey);
       ck[0]! ^= 0x01;
       const tampered: SerializedSKDM = { ...skdm, chainKey: bytesToBase64(ck) };
 
-      expect(verifySKDM(tampered)).toBe(false);
+      expect(verifySKDM(tampered, identity.publicKey)).toBe(false);
     });
 
     it('returns false for an SKDM signed by a different key (wrong-signer)', () => {
-      const stateA = SenderKeyState.create();
-      const stateB = SenderKeyState.create();
-      const skdm = createSKDM('alice', stateA);
+      const state = SenderKeyState.create();
+      const identityA = generateSigningKeyPair();
+      const identityB = generateSigningKeyPair();
+      const skdm = createSKDM('alice', state, identityA.privateKey, identityA.publicKey);
 
-      // Replace the embedded public key with an unrelated one while keeping
-      // the signature that was produced with stateA's private key.
-      const tampered: SerializedSKDM = {
-        ...skdm,
-        signingPublicKey: bytesToBase64(stateB.signingKey.publicKey),
-      };
-
-      expect(verifySKDM(tampered)).toBe(false);
+      expect(verifySKDM(skdm, identityB.publicKey)).toBe(false);
     });
 
     it('returns false when the distributionId is tampered', () => {
       const state = SenderKeyState.create();
-      const skdm = createSKDM('alice', state);
+      const identity = generateSigningKeyPair();
+      const skdm = createSKDM('alice', state, identity.privateKey, identity.publicKey);
       const tampered: SerializedSKDM = { ...skdm, distributionId: skdm.distributionId + 'X' };
-      expect(verifySKDM(tampered)).toBe(false);
+      expect(verifySKDM(tampered, identity.publicKey)).toBe(false);
     });
   });
 });
@@ -173,8 +171,10 @@ describe('GroupCipher', () => {
       const aliceCipher = new GroupCipher(aliceStore, GROUP_ID);
       const bobCipher = new GroupCipher(bobStore, GROUP_ID);
 
-      const skdm = await aliceCipher.rotate('alice');
-      await bobCipher.processDistributionMessage('alice', skdm);
+      const identity = generateSigningKeyPair();
+
+      const skdm = await aliceCipher.rotate('alice', identity.privateKey, identity.publicKey);
+      await bobCipher.processDistributionMessage('alice', skdm, identity.publicKey);
 
       const plaintext = 'hello group from alice';
       const message = await aliceCipher.encrypt('alice', plaintext);
@@ -194,8 +194,10 @@ describe('GroupCipher', () => {
       const aliceCipher = new GroupCipher(aliceStore, GROUP_ID);
       const bobCipher = new GroupCipher(bobStore, GROUP_ID);
 
-      const skdm = await aliceCipher.rotate('alice');
-      await bobCipher.processDistributionMessage('alice', skdm);
+      const identity = generateSigningKeyPair();
+
+      const skdm = await aliceCipher.rotate('alice', identity.privateKey, identity.publicKey);
+      await bobCipher.processDistributionMessage('alice', skdm, identity.publicKey);
 
       const plaintext = 'héllo こんにちは 🚀✨';
       const message = await aliceCipher.encrypt('alice', plaintext);
@@ -211,8 +213,10 @@ describe('GroupCipher', () => {
       const aliceCipher = new GroupCipher(aliceStore, GROUP_ID);
       const bobCipher = new GroupCipher(bobStore, GROUP_ID);
 
-      const skdm = await aliceCipher.rotate('alice');
-      await bobCipher.processDistributionMessage('alice', skdm);
+      const identity = generateSigningKeyPair();
+
+      const skdm = await aliceCipher.rotate('alice', identity.privateKey, identity.publicKey);
+      await bobCipher.processDistributionMessage('alice', skdm, identity.publicKey);
 
       const message = await aliceCipher.encrypt('alice', 'top secret');
 
@@ -229,8 +233,10 @@ describe('GroupCipher', () => {
       const aliceCipher = new GroupCipher(aliceStore, GROUP_ID);
       const bobCipher = new GroupCipher(bobStore, GROUP_ID);
 
-      const skdm = await aliceCipher.rotate('alice');
-      await bobCipher.processDistributionMessage('alice', skdm);
+      const identity = generateSigningKeyPair();
+
+      const skdm = await aliceCipher.rotate('alice', identity.privateKey, identity.publicKey);
+      await bobCipher.processDistributionMessage('alice', skdm, identity.publicKey);
 
       const message = await aliceCipher.encrypt('alice', 'msg1');
       const raw = base64ToBytes(message.ciphertext);
@@ -251,8 +257,10 @@ describe('GroupCipher', () => {
       const aliceCipher = new GroupCipher(aliceStore, GROUP_ID);
       const wrongCipher = new GroupCipher(bobStore, 'wrong-group');
 
-      const skdm = await aliceCipher.rotate('alice');
-      await wrongCipher.processDistributionMessage('alice', skdm);
+      const identity = generateSigningKeyPair();
+
+      const skdm = await aliceCipher.rotate('alice', identity.privateKey, identity.publicKey);
+      await wrongCipher.processDistributionMessage('alice', skdm, identity.publicKey);
 
       const message = await aliceCipher.encrypt('alice', 'test');
 
@@ -264,13 +272,15 @@ describe('GroupCipher', () => {
 
   describe('stale distribution', () => {
     it('rejects messages with an old distributionId after rotation', async () => {
+      const identity = generateSigningKeyPair();
+
       // Alice's first key — rotate stores the state and returns the SKDM.
-      await cipher.rotate('alice');
+      await cipher.rotate('alice', identity.privateKey, identity.publicKey);
       const msg = await cipher.encrypt('alice', 'under key v1');
 
       // Rotate again — stores a fresh state with a new distributionId,
       // replacing the previous one in the store.
-      await cipher.rotate('alice');
+      await cipher.rotate('alice', identity.privateKey, identity.publicKey);
 
       // The old message carries distributionId v1; the store now has v2.
       await expect(cipher.decrypt(msg)).rejects.toThrow('Distribution mismatch');
@@ -284,8 +294,10 @@ describe('GroupCipher', () => {
       const aliceCipher = new GroupCipher(aliceStore, GROUP_ID);
       const bobCipher = new GroupCipher(bobStore, GROUP_ID);
 
-      const skdm = await aliceCipher.rotate('alice');
-      await bobCipher.processDistributionMessage('alice', skdm);
+      const identity = generateSigningKeyPair();
+
+      const skdm = await aliceCipher.rotate('alice', identity.privateKey, identity.publicKey);
+      await bobCipher.processDistributionMessage('alice', skdm, identity.publicKey);
 
       const messages = [
         await aliceCipher.encrypt('alice', 'msg-0'),
@@ -298,25 +310,25 @@ describe('GroupCipher', () => {
       expect(await bobCipher.decrypt(messages[2]!)).toBe('msg-2');
     });
 
-    it('rejects out-of-order messages (sender keys are strictly sequential)', async () => {
+    it('rejects messages whose iteration is behind the current chain', async () => {
       const aliceStore = new InMemorySignalProtocolStore();
       const bobStore = new InMemorySignalProtocolStore();
       const aliceCipher = new GroupCipher(aliceStore, GROUP_ID);
       const bobCipher = new GroupCipher(bobStore, GROUP_ID);
 
-      const skdm = await aliceCipher.rotate('alice');
-      await bobCipher.processDistributionMessage('alice', skdm);
+      const identity = generateSigningKeyPair();
+
+      const skdm = await aliceCipher.rotate('alice', identity.privateKey, identity.publicKey);
+      await bobCipher.processDistributionMessage('alice', skdm, identity.publicKey);
 
       const m0 = await aliceCipher.encrypt('alice', 'zero');
       const m1 = await aliceCipher.encrypt('alice', 'one');
 
-      // m1 arrives first — the chain hasn't advanced to its position yet.
-      await expect(bobCipher.decrypt(m1)).rejects.toThrow();
-
-      // Even after the failed attempt (which rolled back), m0 decrypts fine.
-      expect(await bobCipher.decrypt(m0)).toBe('zero');
-      // Now the chain has caught up — m1 decrypts successfully.
+      // m1 arrives first — the chain fast-forwards to match its iteration.
       expect(await bobCipher.decrypt(m1)).toBe('one');
+
+      // m0 is now behind the chain (already skipped) and is rejected.
+      await expect(bobCipher.decrypt(m0)).rejects.toThrow();
     });
   });
 
@@ -327,13 +339,16 @@ describe('GroupCipher', () => {
       const aliceCipher = new GroupCipher(aliceStore, GROUP_ID);
       const bobCipher = new GroupCipher(bobStore, GROUP_ID);
 
+      const aliceIdentity = generateSigningKeyPair();
+      const bobIdentity = generateSigningKeyPair();
+
       // Both create their own sender keys.
-      const aliceSkdm = await aliceCipher.rotate('alice');
-      const bobSkdm = await bobCipher.rotate('bob');
+      const aliceSkdm = await aliceCipher.rotate('alice', aliceIdentity.privateKey, aliceIdentity.publicKey);
+      const bobSkdm = await bobCipher.rotate('bob', bobIdentity.privateKey, bobIdentity.publicKey);
 
       // Cross-process the distribution messages.
-      await aliceCipher.processDistributionMessage('bob', bobSkdm);
-      await bobCipher.processDistributionMessage('alice', aliceSkdm);
+      await aliceCipher.processDistributionMessage('bob', bobSkdm, bobIdentity.publicKey);
+      await bobCipher.processDistributionMessage('alice', aliceSkdm, aliceIdentity.publicKey);
 
       // Alice → Bob.
       const msgFromAlice = await aliceCipher.encrypt('alice', 'alice says hi');
@@ -375,36 +390,42 @@ describe('GroupCipher', () => {
 
   describe('getDistributionMessage', () => {
     it('returns a verifiable SKDM for the current sender key state', async () => {
-      const skdm = await cipher.rotate('alice');
+      const identity = generateSigningKeyPair();
+      const skdm = await cipher.rotate('alice', identity.privateKey, identity.publicKey);
       // rotate already stored, so getDistributionMessage reads the fresh state.
-      const dm2 = await cipher.getDistributionMessage('alice');
-      expect(verifySKDM(dm2)).toBe(true);
+      const dm2 = await cipher.getDistributionMessage('alice', identity.privateKey, identity.publicKey);
+      expect(verifySKDM(dm2, identity.publicKey)).toBe(true);
       expect(dm2.senderId).toBe('alice');
     });
 
     it('throws when no sender key exists', async () => {
-      await expect(cipher.getDistributionMessage('nobody')).rejects.toThrow();
+      const identity = generateSigningKeyPair();
+      await expect(
+        cipher.getDistributionMessage('nobody', identity.privateKey, identity.publicKey),
+      ).rejects.toThrow();
     });
   });
 
   describe('processDistributionMessage', () => {
     it('rejects an unverified SKDM', async () => {
       const state = SenderKeyState.create();
-      const skdm = createSKDM('alice', state);
+      const identity = generateSigningKeyPair();
+      const skdm = createSKDM('alice', state, identity.privateKey, identity.publicKey);
 
       const ck = base64ToBytes(skdm.chainKey);
       ck[0]! ^= 0x01;
       const bad: SerializedSKDM = { ...skdm, chainKey: bytesToBase64(ck) };
 
-      await expect(cipher.processDistributionMessage('alice', bad)).rejects.toThrow(
-        'Invalid SKDM signature',
-      );
+      await expect(
+        cipher.processDistributionMessage('alice', bad, identity.publicKey),
+      ).rejects.toThrow('Invalid SKDM signature');
     });
 
     it('stores the received state ready for decryption', async () => {
       const state = SenderKeyState.create();
-      const skdm = createSKDM('alice', state);
-      await cipher.processDistributionMessage('alice', skdm);
+      const identity = generateSigningKeyPair();
+      const skdm = createSKDM('alice', state, identity.privateKey, identity.publicKey);
+      await cipher.processDistributionMessage('alice', skdm, identity.publicKey);
 
       const raw = await store.loadSenderKey(GROUP_ID, 'alice');
       expect(raw).toBeDefined();
@@ -431,6 +452,8 @@ describe('GroupCipher', () => {
         ciphertext: bytesToBase64(new Uint8Array(32)),
         distributionId: 'does-not-exist',
         senderId: 'stranger',
+        iteration: 0,
+        signature: '',
       };
       await expect(cipher.decrypt(fakeMessage)).rejects.toThrow('No sender key');
     });

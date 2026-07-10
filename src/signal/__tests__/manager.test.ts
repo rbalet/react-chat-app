@@ -178,6 +178,7 @@ describe('Group messaging (Sender Keys)', () => {
     const raw = await aliceStore.loadSenderKey('group1', 'alice');
     expect(raw).toBeDefined();
     const state = JSON.parse(raw!);
+    expect(state.iteration).toBe(0);
     expect(state.chainKey).toBeTypeOf('string');
     expect(state.distributionId).toBeTypeOf('string');
     expect(state.signingPublicKey).toBeTypeOf('string');
@@ -189,10 +190,12 @@ describe('Group messaging (Sender Keys)', () => {
     const skdm = await alice.getSenderKeyDistribution('group1');
     expect(skdm.senderId).toBe('alice');
     expect(skdm.distributionId).toBeTypeOf('string');
+    expect(skdm.iteration).toBe(0);
     expect(skdm.chainKey).toBeTypeOf('string');
     expect(skdm.signingPublicKey).toBeTypeOf('string');
     expect(skdm.signature).toBeTypeOf('string');
-    expect(verifySKDM(skdm)).toBe(true);
+    const identity = await aliceStore.getIdentityKeyPair();
+    expect(verifySKDM(skdm, identity!.ed.publicKey)).toBe(true);
   });
 
   it("processSenderKeyDistribution allows Bob to receive Alice's sender key", async () => {
@@ -211,6 +214,7 @@ describe('Group messaging (Sender Keys)', () => {
 
     const msg = await alice.encryptGroupMessage('group1', 'hello group');
     expect(msg.senderId).toBe('alice');
+    expect(msg.iteration).toBeTypeOf('number');
     expect(msg.ciphertext).toBeTypeOf('string');
     expect(msg.ciphertext).not.toContain('hello');
 
@@ -233,7 +237,7 @@ describe('Group messaging (Sender Keys)', () => {
     };
     await expect(
       bob.processSenderKeyDistribution('group1', 'alice', forged),
-    ).rejects.toThrow('Invalid SKDM');
+    ).rejects.toThrow('Invalid SKDM signature');
   });
 
   it('rotated sender key: old messages rejected under new distributionId', async () => {

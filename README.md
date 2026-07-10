@@ -9,15 +9,33 @@
 > Read **[BRIEF.md](BRIEF.md)** for the plan; the sections below describe
 > the original 2021 demo app and are partially outdated.
 
+## Run the PoC (3 processes)
+
+```bash
+# 1. PostgreSQL
+cd backend && docker compose up -d
+
+# 2. Prekey server + WS relay on :4000
+cd backend && npm install && npm run dev
+
+# 3. Frontend (Vite, proxies /keys and /api to :4000)
+npm install && npm run dev
+```
+
+Open two different browsers (or two tabs — the in-memory signal store is
+per-tab), log in as `Alice` and `Bob`, and chat. Prekeys live in
+PostgreSQL ([backend/README.md](backend/README.md)); messages transit
+encrypted through the WS relay and are never stored server-side. The
+client auto-reconnects its WebSocket (1s→10s backoff) when the backend
+restarts; messages relayed while a peer is disconnected are dropped
+(no offline queue — PoC).
+
 ## Technology Stack
 1. ReactJS library for UI
 2. Signal Protocol Implementation for E2EE — from-scratch module in `src/signal/`
 3. Axios for AJAX calls
-4. LocalStorage to store/fetch Pre-key bundle and Chats/Conversations
+4. LocalStorage to store/fetch Chats/Conversations (prekeys now live in PostgreSQL)
 5. Web Sockets Implementation for Instant Messaging
-
-## To Initialize the Frontend of this Project use the command -
-` npm run dev `
 
 ## Components
 1. Login
@@ -30,7 +48,7 @@
 2. GET - api/users/users/userId/role - Returns Users Array other than the given User with given role
 
 ## Web Sockets
-1. Establishing WS Connection: `let webSocket = new WebSocket("ws://localhost:3000/chat")`
+1. Establishing WS Connection: `let webSocket = new WebSocket("ws://localhost:4000/chat/<userId>")`
 2. Event Listeners of the webSocket Object:
 ```
     webSocket.onopen = () => {

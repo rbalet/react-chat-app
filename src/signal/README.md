@@ -12,8 +12,10 @@ public-domain specifications at <https://signal.org/docs/>.
 
 - ✅ Phase 1: core crypto, X3DH, Double Ratchet, sessions, store, facade —
   implemented and covered by the Vitest suite (`npm test`).
+- ✅ Backend key-server endpoints + WS relay (`backend/`, PostgreSQL) and
+  HTTP `KeyServerClient` (`src/services/http-key-server.ts`) — verified
+  end-to-end with two isolated clients.
 - ⬜ Phase 2: Sender Keys (groups).
-- ⬜ Backend key-server endpoints (separate repo) + real transport.
 
 ## Legal / provenance
 

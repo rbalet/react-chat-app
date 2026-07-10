@@ -97,6 +97,30 @@ describe('SignalProtocolManager', () => {
     expect(await bob.decryptMessage('alice', message)).toBe('no opk left');
   });
 
+  it('serializes concurrent decrypts per peer (no replay window)', async () => {
+    // Establish the session and clear the handshake phase.
+    expect(await bob.decryptMessage('alice', await alice.encryptMessage('bob', 'boot'))).toBe('boot');
+    expect(await alice.decryptMessage('bob', await bob.encryptMessage('alice', 'ack'))).toBe('ack');
+
+    const m0 = await alice.encryptMessage('bob', 'zero');
+    const m1 = await alice.encryptMessage('bob', 'one');
+
+    // Interleaved delivery: without per-peer serialization, both decrypts
+    // start from the same stored state — the second one skips m0's key,
+    // stores it, and the replay below would be ACCEPTED.
+    const [p0, p1] = await Promise.all([
+      bob.decryptMessage('alice', m0),
+      bob.decryptMessage('alice', m1),
+    ]);
+    expect([p0, p1]).toEqual(['zero', 'one']);
+
+    await expect(bob.decryptMessage('alice', m0)).rejects.toThrow();
+    await expect(bob.decryptMessage('alice', m1)).rejects.toThrow();
+
+    // Session still healthy afterwards.
+    expect(await bob.decryptMessage('alice', await alice.encryptMessage('bob', 'two'))).toBe('two');
+  });
+
   it('supports three-party pairwise sessions independently', async () => {
     const carolStore = new InMemorySignalProtocolStore();
     const carol = new SignalProtocolManager('carol', carolStore, server);

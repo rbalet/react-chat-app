@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { InMemorySignalProtocolStore } from '../store/in-memory-store';
 import { SessionCipher } from '../session/session-cipher';
 import { startSession } from '../session/session-builder';
+import { parsePreKeyMessage, serializePreKeyMessage } from '../session/prekey-message';
+import { base64ToBytes, bytesToBase64 } from '../core/utils';
 import { generateIdentityKeyPair } from '../identity/identity-key';
 import {
   generateOneTimePreKeys,
@@ -148,5 +150,79 @@ describe('SessionCipher end-to-end', () => {
     await expect(new SessionCipher(alice.store, 'nobody').encrypt('x')).rejects.toThrow(
       /No session/,
     );
+  });
+
+  it('rejects a replayed prekey envelope with a substituted identity key', async () => {
+    await startSession(alice.store, bob.userId, await bundleOf(bob));
+    const aliceCipher = new SessionCipher(alice.store, bob.userId);
+    const bobCipher = new SessionCipher(bob.store, alice.userId);
+
+    const genuine = await aliceCipher.encrypt('genuine');
+    expect(await bobCipher.decrypt(genuine)).toBe('genuine'); // pins Alice's identity
+
+    // Mallory re-wraps Alice's envelope with her own identity key: the
+    // baseKey fast-path must not match, and TOFU must reject it.
+    const mallory = generateIdentityKeyPair();
+    const parsed = parsePreKeyMessage(base64ToBytes(genuine.body));
+    const forged = {
+      ...genuine,
+      body: bytesToBase64(
+        serializePreKeyMessage({ ...parsed, identityKey: mallory.ed.publicKey }),
+      ),
+    };
+    await expect(bobCipher.decrypt(forged)).rejects.toThrow(/[Uu]ntrusted/);
+
+    // The genuine session is unharmed.
+    expect(await bobCipher.decrypt(await aliceCipher.encrypt('still fine'))).toBe('still fine');
+  });
+});
+
+describe('Concurrent mutual initiation (tie-break)', () => {
+  it('converges on a single session; exactly one handshake survives', async () => {
+    // Both sides initiate before seeing the other's handshake.
+    await startSession(alice.store, bob.userId, await bundleOf(bob));
+    await startSession(bob.store, alice.userId, await bundleOf(alice));
+    const aliceCipher = new SessionCipher(alice.store, bob.userId);
+    const bobCipher = new SessionCipher(bob.store, alice.userId);
+
+    const fromAlice = await aliceCipher.encrypt('from alice');
+    const fromBob = await bobCipher.encrypt('from bob');
+
+    // Crosswise delivery. The LOWER X3DH base key wins on both sides, so
+    // exactly one side accepts the peer's handshake (and becomes responder);
+    // the other rejects it and keeps its own pending handshake.
+    const aliceGot = await aliceCipher.decrypt(fromBob).then(
+      (plaintext) => ({ ok: true as const, plaintext }),
+      () => ({ ok: false as const }),
+    );
+    const bobGot = await bobCipher.decrypt(fromAlice).then(
+      (plaintext) => ({ ok: true as const, plaintext }),
+      () => ({ ok: false as const }),
+    );
+    expect(aliceGot.ok).not.toBe(bobGot.ok);
+
+    // If Alice accepted, Bob's handshake won (and vice versa).
+    const [winner, responder, deliveredText] = aliceGot.ok
+      ? [bobCipher, aliceCipher, 'from bob']
+      : [aliceCipher, bobCipher, 'from alice'];
+    const accepted = aliceGot.ok ? aliceGot : bobGot;
+    if (!accepted.ok) throw new Error('unreachable: exactly one side accepted');
+    expect(accepted.plaintext).toBe(deliveredText);
+
+    // The winner never received an authenticated inbound yet, so it keeps
+    // attaching its handshake; the responder decrypts it via the duplicate
+    // fast-path. The loser's first payload is lost — by design.
+    const followUp = await winner.encrypt('follow-up');
+    expect(followUp.type).toBe(MessageType.PreKey);
+    expect(await responder.decrypt(followUp)).toBe('follow-up');
+
+    const reply = await responder.encrypt('reply');
+    expect(reply.type).toBe(MessageType.Signal);
+    expect(await winner.decrypt(reply)).toBe('reply');
+
+    // Fully converged: both directions now flow as regular Signal messages.
+    const settled = await winner.encrypt('settled');
+    expect(settled.type).toBe(MessageType.Signal);
+    expect(await responder.decrypt(settled)).toBe('settled');
   });
 });

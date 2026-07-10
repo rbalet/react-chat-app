@@ -8,10 +8,22 @@
  *
  * Decrypt: PreKey envelopes bootstrap the responder session (idempotently
  * for duplicates); Signal envelopes go straight to the ratchet.
+ *
+ * Concurrency contract: operations are read-modify-write on the stored
+ * session record. Callers MUST NOT run two operations for the same peer
+ * concurrently — SignalProtocolManager serializes them per peer; direct
+ * users of this class must do the same.
  */
 
 import { MessageType, type EncryptedMessage } from '../core/types';
-import { base64ToBytes, bytesToBase64, bytesToUtf8, equalBytes, utf8ToBytes } from '../core/utils';
+import {
+  base64ToBytes,
+  bytesToBase64,
+  bytesToUtf8,
+  compareBytes,
+  equalBytes,
+  utf8ToBytes,
+} from '../core/utils';
 import { SessionRecord } from './session-record';
 import {
   parsePreKeyMessage,
@@ -77,11 +89,33 @@ export class SessionCipher {
     // Duplicate/parallel prekey messages for a session we already built:
     // reuse the existing ratchet instead of re-running X3DH (the one-time
     // prekey is already gone, and rebuilding would fork the session).
+    // The identity must match too — a mismatch falls through to the
+    // regular path, where the TOFU check rejects it with a clear error.
     const existing = await this.tryLoadRecord();
-    if (existing?.theirBaseKey && equalBytes(existing.theirBaseKey, preKeyMessage.baseKey)) {
+    if (
+      existing?.theirBaseKey &&
+      equalBytes(existing.theirBaseKey, preKeyMessage.baseKey) &&
+      equalBytes(existing.theirIdentityKey, preKeyMessage.identityKey)
+    ) {
       const plaintext = existing.ratchet.decrypt(preKeyMessage.message);
       await this.store.storeSession(this.remoteUserId, existing.serialize());
       return bytesToUtf8(plaintext);
+    }
+
+    // Concurrent initiation: both sides sent a handshake before seeing the
+    // other's. Each would otherwise adopt the peer's session and abandon its
+    // own — two forked sessions that can never decrypt each other. Applying
+    // the same deterministic rule on both sides (LOWER base key wins) makes
+    // exactly one handshake survive: the loser's first payload is lost (the
+    // sender keeps re-sending its own handshake envelope, which the other
+    // side accepts), and both converge on the winner's session.
+    if (existing?.pendingPreKey) {
+      const ourBaseKey = base64ToBytes(existing.pendingPreKey.baseKey);
+      if (compareBytes(preKeyMessage.baseKey, ourBaseKey) > 0) {
+        throw new Error(
+          'Concurrent session initiation: our handshake wins the tie-break, rejecting theirs',
+        );
+      }
     }
 
     const record = await buildResponderSession(this.store, this.remoteUserId, preKeyMessage);

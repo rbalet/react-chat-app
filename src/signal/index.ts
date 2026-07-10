@@ -83,11 +83,29 @@ export interface KeyServerClient {
 // ---------------------------------------------------------------------------
 
 export class SignalProtocolManager {
+  /**
+   * Per-peer operation queues. Encrypt/decrypt are read-modify-write on the
+   * stored session record with awaits in between: two interleaved calls for
+   * the same peer would both start from the same state and the last write
+   * would win — losing a chain advance and resurrecting an already-used
+   * skipped message key (replay window). Serializing per peer removes the
+   * interleaving (same role as libsignal's session lock).
+   */
+  private readonly sessionQueues = new Map<string, Promise<unknown>>();
+
   constructor(
     private readonly userId: string,
     private readonly store: SignalProtocolStore,
     private readonly server: KeyServerClient,
   ) {}
+
+  private runExclusive<T>(remoteUserId: string, task: () => Promise<T>): Promise<T> {
+    const previous = this.sessionQueues.get(remoteUserId) ?? Promise.resolve();
+    // Run after the predecessor settles, whatever its outcome.
+    const next = previous.then(task, task);
+    this.sessionQueues.set(remoteUserId, next.catch(() => undefined));
+    return next;
+  }
 
   /**
    * First-run bootstrap: generate the identity key pair, registration id,
@@ -131,16 +149,20 @@ export class SignalProtocolManager {
    * (bundle fetch) if none exists yet.
    */
   async encryptMessage(remoteUserId: string, plaintext: string): Promise<EncryptedMessage> {
-    const cipher = new SessionCipher(this.store, remoteUserId);
-    if (!(await cipher.hasSession())) {
-      const bundle = deserializePreKeyBundle(await this.server.fetchPreKeyBundle(remoteUserId));
-      await startSession(this.store, remoteUserId, bundle);
-    }
-    return cipher.encrypt(plaintext);
+    return this.runExclusive(remoteUserId, async () => {
+      const cipher = new SessionCipher(this.store, remoteUserId);
+      if (!(await cipher.hasSession())) {
+        const bundle = deserializePreKeyBundle(await this.server.fetchPreKeyBundle(remoteUserId));
+        await startSession(this.store, remoteUserId, bundle);
+      }
+      return cipher.encrypt(plaintext);
+    });
   }
 
   /** Decrypt a message from a peer (bootstraps the session on prekey messages). */
   async decryptMessage(remoteUserId: string, message: EncryptedMessage): Promise<string> {
-    return new SessionCipher(this.store, remoteUserId).decrypt(message);
+    return this.runExclusive(remoteUserId, () =>
+      new SessionCipher(this.store, remoteUserId).decrypt(message),
+    );
   }
 }

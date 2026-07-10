@@ -42,12 +42,30 @@ export function base64ToBytes(b64: string): Uint8Array {
     const n1 = BASE64_LOOKUP[clean[i + 1] as string];
     const n2 = clean[i + 2] === undefined ? undefined : BASE64_LOOKUP[clean[i + 2] as string];
     const n3 = clean[i + 3] === undefined ? undefined : BASE64_LOOKUP[clean[i + 3] as string];
-    if (n0 === undefined || n1 === undefined) throw new Error('Invalid base64 input');
+    // An invalid character must throw — an absent lookup only stands for
+    // "end of input", never for a character outside the alphabet.
+    if (
+      n0 === undefined ||
+      n1 === undefined ||
+      (n2 === undefined && clean[i + 2] !== undefined) ||
+      (n3 === undefined && clean[i + 3] !== undefined)
+    ) {
+      throw new Error('Invalid base64 input');
+    }
     out[o++] = (n0 << 2) | (n1 >> 4);
     if (n2 !== undefined) out[o++] = ((n1 & 0x0f) << 4) | (n2 >> 2);
     if (n3 !== undefined) out[o++] = ((n2! & 0x03) << 6) | n3;
   }
   return out;
+}
+
+/** Lexicographic byte comparison: negative / 0 / positive like a comparator. */
+export function compareBytes(a: Uint8Array, b: Uint8Array): number {
+  const len = Math.min(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    if (a[i] !== b[i]) return a[i]! - b[i]!;
+  }
+  return a.length - b.length;
 }
 
 /** Big-endian u32 serialization for counters and ids. */

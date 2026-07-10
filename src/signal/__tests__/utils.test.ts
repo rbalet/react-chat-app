@@ -4,6 +4,7 @@ import {
   bytesToBase64,
   bytesToU32,
   bytesToUtf8,
+  compareBytes,
   u32ToBytes,
   utf8ToBytes,
 } from '../core/utils';
@@ -36,6 +37,27 @@ describe('base64 codec', () => {
 
   it('rejects invalid input', () => {
     expect(() => base64ToBytes('a$b=')).toThrow();
+  });
+
+  it('rejects an invalid character at every position of a quad', () => {
+    // Positions 2 and 3 were silently treated as end-of-input before the
+    // strict check — the decode truncated instead of throwing.
+    expect(() => base64ToBytes('$m9vYmFy')).toThrow('Invalid base64');
+    expect(() => base64ToBytes('Z$9vYmFy')).toThrow('Invalid base64');
+    expect(() => base64ToBytes('Zm$vYmFy')).toThrow('Invalid base64');
+    expect(() => base64ToBytes('Zm9$YmFy')).toThrow('Invalid base64');
+    expect(() => base64ToBytes('Zm9vYm y')).toThrow('Invalid base64');
+  });
+});
+
+describe('compareBytes', () => {
+  it('orders lexicographically with length as tie-break', () => {
+    const a = new Uint8Array([1, 2, 3]);
+    expect(compareBytes(a, new Uint8Array([1, 2, 3]))).toBe(0);
+    expect(compareBytes(a, new Uint8Array([1, 2, 4]))).toBeLessThan(0);
+    expect(compareBytes(new Uint8Array([2]), a)).toBeGreaterThan(0);
+    expect(compareBytes(new Uint8Array([1, 2]), a)).toBeLessThan(0);
+    expect(compareBytes(a, new Uint8Array([1, 2]))).toBeGreaterThan(0);
   });
 });
 

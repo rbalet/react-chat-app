@@ -40,4 +40,9 @@ export interface SignalProtocolStore {
   storeSession(userId: string, record: string): Promise<void>;
   loadSession(userId: string): Promise<string | undefined>;
   removeSession(userId: string): Promise<void>;
+
+  // --- Sender Keys (groups) ---------------------------------------------------
+  /** Serialized SenderKeyState JSON keyed by (groupId, senderId). */
+  storeSenderKey(groupId: string, senderId: string, state: string): Promise<void>;
+  loadSenderKey(groupId: string, senderId: string): Promise<string | undefined>;
 }

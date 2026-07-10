@@ -19,6 +19,9 @@ import { DEFAULT_PREKEY_BATCH_SIZE } from './core/constants';
 import { bytesToBase64 } from './core/utils';
 import type { EncryptedMessage } from './core/types';
 import type { SignalProtocolStore } from './store/store-interface';
+import { SenderKeyState } from './sender-keys/sender-key-state';
+import { GroupCipher, type GroupMessage } from './sender-keys/group-cipher';
+import type { SerializedSKDM } from './sender-keys/sender-key-distribution';
 
 // ---------------------------------------------------------------------------
 // Public re-exports
@@ -51,6 +54,9 @@ export {
   generateRegistrationId,
   generateSignedPreKey,
 } from './identity/key-helper';
+export { GroupCipher } from './sender-keys/group-cipher';
+export type { GroupMessage } from './sender-keys/group-cipher';
+export type { SerializedSKDM } from './sender-keys/sender-key-distribution';
 
 // ---------------------------------------------------------------------------
 // Key server contract (implemented by the application, e.g. via axios/fetch)
@@ -93,6 +99,9 @@ export class SignalProtocolManager {
    */
   private readonly sessionQueues = new Map<string, Promise<unknown>>();
 
+  /** Per-group operation queues (same serialising pattern as sessions). */
+  private readonly groupQueues = new Map<string, Promise<unknown>>();
+
   constructor(
     private readonly userId: string,
     private readonly store: SignalProtocolStore,
@@ -104,6 +113,13 @@ export class SignalProtocolManager {
     // Run after the predecessor settles, whatever its outcome.
     const next = previous.then(task, task);
     this.sessionQueues.set(remoteUserId, next.catch(() => undefined));
+    return next;
+  }
+
+  private runGroupExclusive<T>(groupId: string, task: () => Promise<T>): Promise<T> {
+    const previous = this.groupQueues.get(groupId) ?? Promise.resolve();
+    const next = previous.then(task, task);
+    this.groupQueues.set(groupId, next.catch(() => undefined));
     return next;
   }
 
@@ -164,5 +180,63 @@ export class SignalProtocolManager {
     return this.runExclusive(remoteUserId, () =>
       new SessionCipher(this.store, remoteUserId).decrypt(message),
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Group messaging (Sender Keys)
+  // ---------------------------------------------------------------------------
+
+  /** Create a fresh SenderKeyState for this user in a group. */
+  async setupSenderKey(groupId: string): Promise<void> {
+    return this.runGroupExclusive(groupId, async () => {
+      const state = SenderKeyState.create();
+      await this.store.storeSenderKey(groupId, this.userId, JSON.stringify(state.serialize()));
+    });
+  }
+
+  /** Get a SenderKeyDistributionMessage (SKDM) for this user's current key. */
+  async getSenderKeyDistribution(groupId: string): Promise<SerializedSKDM> {
+    return this.runGroupExclusive(groupId, async () => {
+      const cipher = new GroupCipher(this.store, groupId);
+      return cipher.getDistributionMessage(this.userId);
+    });
+  }
+
+  /** Process an SKDM received from another sender — verifies the signature
+   *  and stores the sender key state for future decrypts. */
+  async processSenderKeyDistribution(
+    groupId: string,
+    senderId: string,
+    skdm: SerializedSKDM,
+  ): Promise<void> {
+    return this.runGroupExclusive(groupId, async () => {
+      const cipher = new GroupCipher(this.store, groupId);
+      return cipher.processDistributionMessage(senderId, skdm);
+    });
+  }
+
+  /** Encrypt a message for a group using this user's sender key. */
+  async encryptGroupMessage(groupId: string, plaintext: string): Promise<GroupMessage> {
+    return this.runGroupExclusive(groupId, async () => {
+      const cipher = new GroupCipher(this.store, groupId);
+      return cipher.encrypt(this.userId, plaintext);
+    });
+  }
+
+  /** Decrypt a group message from another sender. */
+  async decryptGroupMessage(groupId: string, message: GroupMessage): Promise<string> {
+    return this.runGroupExclusive(groupId, async () => {
+      const cipher = new GroupCipher(this.store, groupId);
+      return cipher.decrypt(message);
+    });
+  }
+
+  /** Rotate this user's sender key (e.g. on member departure) and return the
+   *  new SKDM for redistribution to remaining members. */
+  async rotateSenderKey(groupId: string): Promise<SerializedSKDM> {
+    return this.runGroupExclusive(groupId, async () => {
+      const cipher = new GroupCipher(this.store, groupId);
+      return cipher.rotate(this.userId);
+    });
   }
 }

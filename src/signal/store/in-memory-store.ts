@@ -14,6 +14,7 @@ export class InMemorySignalProtocolStore implements SignalProtocolStore {
   private readonly signedPreKeys = new Map<number, SignedPreKeyPair>();
   private readonly oneTimePreKeys = new Map<number, OneTimePreKeyPair>();
   private readonly sessions = new Map<string, string>();
+  private readonly senderKeys = new Map<string, Map<string, string>>();
 
   async getIdentityKeyPair(): Promise<IdentityKeyPair | undefined> {
     return this.identityKeyPair;
@@ -76,5 +77,14 @@ export class InMemorySignalProtocolStore implements SignalProtocolStore {
 
   async removeSession(userId: string): Promise<void> {
     this.sessions.delete(userId);
+  }
+
+  async storeSenderKey(groupId: string, senderId: string, state: string): Promise<void> {
+    if (!this.senderKeys.has(groupId)) this.senderKeys.set(groupId, new Map());
+    this.senderKeys.get(groupId)!.set(senderId, state);
+  }
+
+  async loadSenderKey(groupId: string, senderId: string): Promise<string | undefined> {
+    return this.senderKeys.get(groupId)?.get(senderId);
   }
 }

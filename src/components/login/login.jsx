@@ -17,7 +17,7 @@ export default class Login extends Component {
         // Call Login API to get user ID if the user exists in DB
         try {
             let loginResult = await API.logIn(this.state.username)
-            this.onLoginComplete(loginResult.data)
+            this.onLoginComplete(loginResult.data.data)
         } catch (error) {
             let element = document.querySelector(".incorrect-user")
             element.innerText = "Some Error Occurred."

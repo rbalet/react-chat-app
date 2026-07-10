@@ -1,14 +1,23 @@
 # A Secure Chat Application using React and the Signal Protocol
 
+> **⚠️ 2026 — Repurposed as a Signal Protocol PoC.** This repo now hosts a
+> **from-scratch, clean-room TypeScript implementation** of the Signal
+> Protocol (X3DH + Double Ratchet) in [`src/signal/`](src/signal/README.md),
+> built on `@noble` crypto and licensed Apache-2.0. The old vendored
+> `libsignal-protocol.js` (GPL) is gone, and the build moved from
+> Create React App to **Vite** (`npm run dev`, tests with `npm test`).
+> Read **[BRIEF.md](BRIEF.md)** for the plan; the sections below describe
+> the original 2021 demo app and are partially outdated.
+
 ## Technology Stack
 1. ReactJS library for UI
-2. Signal Protocol Implementation for E2EE
+2. Signal Protocol Implementation for E2EE — from-scratch module in `src/signal/`
 3. Axios for AJAX calls
 4. LocalStorage to store/fetch Pre-key bundle and Chats/Conversations
 5. Web Sockets Implementation for Instant Messaging
 
 ## To Initialize the Frontend of this Project use the command -
-` nodemon start `
+` npm run dev `
 
 ## Components
 1. Login

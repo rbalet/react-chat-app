@@ -1,12 +1,19 @@
 # @up4it/signal-protocol
 
 Clean-room TypeScript implementation of the **Signal Protocol** — X3DH,
-Double Ratchet and Sender Keys — written from the public-domain
-specifications published at <https://signal.org/docs/>.
+Double Ratchet (Sender Keys coming in Phase 2) — written from the
+public-domain specifications at <https://signal.org/docs/>.
 
 > Developed inside `react-chat-app` (Phase 1), to be extracted to its own
 > repo and published on npm (Phase 3). See `BRIEF.md` at the repo root for
 > the full plan.
+
+## Status
+
+- ✅ Phase 1: core crypto, X3DH, Double Ratchet, sessions, store, facade —
+  implemented and covered by the Vitest suite (`npm test`).
+- ⬜ Phase 2: Sender Keys (groups).
+- ⬜ Backend key-server endpoints (separate repo) + real transport.
 
 ## Legal / provenance
 
@@ -21,32 +28,51 @@ specifications published at <https://signal.org/docs/>.
 
 ## Constraints
 
-- **Framework-agnostic**: no React, Angular or other framework imports.
+- **Framework-agnostic**: no React, Angular, DOM or Node-specific imports.
+  App glue (localStorage dummy server, UI naming) lives in
+  `src/services/signal-gateway.ts`, outside this module.
 - **Browser/WebView-safe**: pure TypeScript, no native bindings.
 - Crypto primitives exclusively from [`@noble/curves`](https://github.com/paulmillr/noble-curves),
   [`@noble/hashes`](https://github.com/paulmillr/noble-hashes),
-  [`@noble/ciphers`](https://github.com/paulmillr/noble-ciphers).
-- AEAD is **AES-GCM-SIV** (misuse-resistant), not plain AES-GCM.
+  [`@noble/ciphers`](https://github.com/paulmillr/noble-ciphers) (pinned v2.2.0).
+- AEAD is **AES-256-GCM-SIV** (misuse-resistant, RFC 8452), not plain GCM.
 
 ## Layout
 
 ```
-core/         @noble wrappers (DH, HKDF, HMAC, AEAD, sign/verify), utils, types
-identity/     Ed25519 identity key pair + Montgomery conversion, key helper
+core/         constants, @noble wrappers (DH, HKDF, HMAC, AEAD, sign/verify), utils, types
+identity/     Ed25519 identity + Montgomery conversion, key generation helpers
 x3dh/         X3DH key agreement: initiator, responder, prekey bundle
-ratchet/      Double Ratchet: state machine, chains, header, message
-session/      session builder (X3DH → ratchet init), session cipher, session record
+ratchet/      Double Ratchet: KDF chains, header, message AEAD, state machine
+session/      prekey message envelope, session record/builder/cipher
 sender-keys/  group messaging via Sender Keys (Phase 2)
 store/        SignalProtocolStore interface + in-memory implementation
-index.ts      public API: SignalProtocolManager facade
+index.ts      public API: SignalProtocolManager facade + KeyServerClient contract
 ```
 
-## @noble v2 API notes (differs from older docs)
+## Design decisions (vs. the specs)
 
-- `x25519`, `ed25519`: `import { x25519, ed25519 } from '@noble/curves/ed25519'`
-- Edwards→Montgomery conversion: `ed25519.utils.toMontgomery(pub)` and
-  `ed25519.utils.toMontgomerySecret(priv)` (the v1 helpers
-  `edwardsToMontgomeryPub/Priv` no longer exist).
-- AES-GCM-SIV: `import { gcmsiv } from '@noble/ciphers/aes'`
-- HKDF/HMAC/SHA-256: `@noble/hashes/hkdf`, `@noble/hashes/hmac`,
-  `@noble/hashes/sha2`
+- HKDF info strings are ours (`Up4itX3DH_v1`, `Up4itRatchet_v1`,
+  `Up4itMessageKeys_v1`) — deliberately NOT wire-compatible with Signal.
+- Identity keys are Ed25519; DH uses their Montgomery (X25519) form via
+  `ed25519.utils.toMontgomery` / `toMontgomerySecret` (replaces XEdDSA,
+  as libsignal does in practice).
+- Message keys expand to AEAD key + deterministic nonce via HKDF; each
+  message key encrypts exactly one message.
+- Trust model: TOFU (trust-on-first-use); an identity key change makes
+  session establishment fail until the app clears the stored identity.
+- Concurrent session initiation (both sides initiate simultaneously) is
+  resolved naively — last processed handshake wins. Sesame handles this
+  properly in a future phase.
+
+## @noble v2 API notes (differ from v1 docs and BRIEF §6)
+
+- Import paths need the `.js` suffix (strict `exports` map):
+  `@noble/curves/ed25519.js`, `@noble/hashes/hkdf.js`, `@noble/hashes/sha2.js`,
+  `@noble/ciphers/aes.js`, `@noble/ciphers/utils.js`.
+- Edwards→Montgomery: `ed25519.utils.toMontgomery(pub)` /
+  `ed25519.utils.toMontgomerySecret(priv)` (v1's `edwardsToMontgomeryPub/Priv`
+  no longer exist).
+- Key generation: `x25519.keygen()` / `ed25519.keygen()` return
+  `{ secretKey, publicKey }`.
+- AES-GCM-SIV: `gcmsiv(key, nonce, aad?).encrypt/decrypt`.

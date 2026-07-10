@@ -1,7 +1,7 @@
 import React, { Component } from 'react'
 import Login from './components/login/login'
 import ChatWindow from "./components/chatWindow/chatWindow";
-import { createSignalProtocolManager, SignalServerStore } from "./signal/SignalGateway"
+import { createSignalProtocolManager, SignalServerStore } from "./services/signal-gateway"
 
 import './App.css';
 export default class ChatApp extends Component {

@@ -2,26 +2,145 @@
  * @up4it/signal-protocol
  *
  * Clean-room TypeScript implementation of the Signal Protocol
- * (X3DH + Double Ratchet + Sender Keys), based solely on the
- * public-domain specifications at https://signal.org/docs/.
+ * (X3DH + Double Ratchet; Sender Keys in Phase 2), written solely from
+ * the public-domain specifications at https://signal.org/docs/.
  *
- * Framework-agnostic: this module must never import React, Angular,
- * or any other UI framework. Crypto primitives come exclusively from
- * @noble/curves, @noble/hashes and @noble/ciphers.
- *
- * License: Apache-2.0 (see LICENSE in this directory).
- *
- * Module layout (see BRIEF.md §10):
- *   core/         @noble wrappers, utils, shared types
- *   identity/     identity key pair + key helper
- *   x3dh/         X3DH key agreement (initiator, responder, prekey bundle)
- *   ratchet/      Double Ratchet state machine
- *   session/      session builder / cipher / record
- *   sender-keys/  group messaging (Phase 2)
- *   store/        store interface + in-memory implementation
- *
- * Public API (implemented in Phase 1):
- *   export { SignalProtocolManager } from './manager';
+ * Framework-agnostic and transport-agnostic: crypto comes exclusively
+ * from @noble/curves, @noble/hashes and @noble/ciphers; the key server
+ * is an injected interface. License: Apache-2.0 (LICENSE in this dir).
  */
 
-export const SIGNAL_PROTOCOL_VERSION = '0.0.0';
+import { generateOneTimePreKeys, generateRegistrationId, generateSignedPreKey } from './identity/key-helper';
+import { generateIdentityKeyPair } from './identity/identity-key';
+import { deserializePreKeyBundle, type SerializedPreKeyBundle } from './x3dh/prekey-bundle';
+import { startSession } from './session/session-builder';
+import { SessionCipher } from './session/session-cipher';
+import { DEFAULT_PREKEY_BATCH_SIZE } from './core/constants';
+import { bytesToBase64 } from './core/utils';
+import type { EncryptedMessage } from './core/types';
+import type { SignalProtocolStore } from './store/store-interface';
+
+// ---------------------------------------------------------------------------
+// Public re-exports
+// ---------------------------------------------------------------------------
+
+export { MessageType } from './core/types';
+export type {
+  EncryptedMessage,
+  IdentityKeyPair,
+  KeyPair,
+  OneTimePreKeyPair,
+  PreKeyBundle,
+  SignedPreKeyPair,
+} from './core/types';
+export { InMemorySignalProtocolStore } from './store/in-memory-store';
+export type { SignalProtocolStore } from './store/store-interface';
+export { SessionCipher } from './session/session-cipher';
+export { SessionRecord } from './session/session-record';
+export { DoubleRatchet } from './ratchet/ratchet';
+export { x3dhInitiate } from './x3dh/initiator';
+export { x3dhRespond } from './x3dh/responder';
+export {
+  deserializePreKeyBundle,
+  serializePreKeyBundle,
+  type SerializedPreKeyBundle,
+} from './x3dh/prekey-bundle';
+export {
+  generateIdentityKeyPair,
+  generateOneTimePreKeys,
+  generateRegistrationId,
+  generateSignedPreKey,
+} from './identity/key-helper';
+
+// ---------------------------------------------------------------------------
+// Key server contract (implemented by the application, e.g. via axios/fetch)
+// ---------------------------------------------------------------------------
+
+/** Public key material uploaded at initialization. All bytes base64. */
+export interface PublishedKeys {
+  registrationId: number;
+  identityKey: string;
+  signedPreKey: {
+    id: number;
+    publicKey: string;
+    signature: string;
+  };
+  oneTimePreKeys: {
+    id: number;
+    publicKey: string;
+  }[];
+}
+
+export interface KeyServerClient {
+  /** POST /keys/:userId */
+  publishKeys(userId: string, keys: PublishedKeys): Promise<void>;
+  /** GET /keys/:userId — server atomically consumes one one-time prekey. */
+  fetchPreKeyBundle(userId: string): Promise<SerializedPreKeyBundle>;
+}
+
+// ---------------------------------------------------------------------------
+// Facade
+// ---------------------------------------------------------------------------
+
+export class SignalProtocolManager {
+  constructor(
+    private readonly userId: string,
+    private readonly store: SignalProtocolStore,
+    private readonly server: KeyServerClient,
+  ) {}
+
+  /**
+   * First-run bootstrap: generate the identity key pair, registration id,
+   * signed prekey and a batch of one-time prekeys; store the private
+   * halves and publish the public halves to the key server.
+   * No-op if an identity already exists (rotation/replenishment come with
+   * the backend integration).
+   */
+  async initialize(): Promise<void> {
+    if (await this.store.getIdentityKeyPair()) return;
+
+    const identity = generateIdentityKeyPair();
+    const registrationId = generateRegistrationId();
+    const signedPreKey = generateSignedPreKey(identity, 1);
+    const oneTimePreKeys = generateOneTimePreKeys(1, DEFAULT_PREKEY_BATCH_SIZE);
+
+    await this.store.storeIdentityKeyPair(identity);
+    await this.store.storeLocalRegistrationId(registrationId);
+    await this.store.storeSignedPreKey(signedPreKey);
+    for (const preKey of oneTimePreKeys) {
+      await this.store.storeOneTimePreKey(preKey);
+    }
+
+    await this.server.publishKeys(this.userId, {
+      registrationId,
+      identityKey: bytesToBase64(identity.ed.publicKey),
+      signedPreKey: {
+        id: signedPreKey.id,
+        publicKey: bytesToBase64(signedPreKey.keyPair.publicKey),
+        signature: bytesToBase64(signedPreKey.signature),
+      },
+      oneTimePreKeys: oneTimePreKeys.map((preKey) => ({
+        id: preKey.id,
+        publicKey: bytesToBase64(preKey.keyPair.publicKey),
+      })),
+    });
+  }
+
+  /**
+   * Encrypt a message for a peer, establishing the session via X3DH
+   * (bundle fetch) if none exists yet.
+   */
+  async encryptMessage(remoteUserId: string, plaintext: string): Promise<EncryptedMessage> {
+    const cipher = new SessionCipher(this.store, remoteUserId);
+    if (!(await cipher.hasSession())) {
+      const bundle = deserializePreKeyBundle(await this.server.fetchPreKeyBundle(remoteUserId));
+      await startSession(this.store, remoteUserId, bundle);
+    }
+    return cipher.encrypt(plaintext);
+  }
+
+  /** Decrypt a message from a peer (bootstraps the session on prekey messages). */
+  async decryptMessage(remoteUserId: string, message: EncryptedMessage): Promise<string> {
+    return new SessionCipher(this.store, remoteUserId).decrypt(message);
+  }
+}

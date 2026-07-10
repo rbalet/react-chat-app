@@ -225,4 +225,17 @@ describe('Concurrent mutual initiation (tie-break)', () => {
     expect(settled.type).toBe(MessageType.Signal);
     expect(await responder.decrypt(settled)).toBe('settled');
   });
+
+  it('pendingPreKey.baseKey stores only the public ephemeral key (X3DH §3.3)', async () => {
+    await startSession(alice.store, bob.userId, await bundleOf(bob));
+    const raw = await alice.store.loadSession(bob.userId);
+    expect(raw).toBeDefined();
+    const record = JSON.parse(raw!);
+    expect(record.pendingPreKey).toBeDefined();
+    expect(record.pendingPreKey.baseKey).toBeDefined();
+
+    const decoded = base64ToBytes(record.pendingPreKey.baseKey);
+    // Public X25519 key is 32 bytes; a private key would be 64 bytes.
+    expect(decoded.length).toBe(32);
+  });
 });

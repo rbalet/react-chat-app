@@ -7,12 +7,22 @@ const connections = new Map<string, Set<WebSocket>>();
 export function setupWebSocket(server: Server): void {
   const wss = new WebSocketServer({ server });
 
+  // Without an error listener, a socket error emits an unhandled 'error'
+  // event and takes down the whole process.
+  wss.on("error", (err) => {
+    console.error("[ws] server error:", err.message);
+  });
+
   wss.on("connection", (ws: WebSocket, req) => {
     const userId = req.url?.split("/chat/")[1];
     if (!userId) {
       ws.close(4001, "MISSING_USER_ID");
       return;
     }
+
+    ws.on("error", (err) => {
+      console.error(`[ws] socket error (${userId}):`, err.message);
+    });
 
     if (!connections.has(userId)) {
       connections.set(userId, new Set());

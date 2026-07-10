@@ -13,11 +13,21 @@ keysRouter.post("/:userId", async (req, res) => {
   const { registrationId, identityKey, signedPreKey, oneTimePreKeys } = req.body;
 
   if (
-    !registrationId ||
+    !Number.isInteger(registrationId) ||
+    registrationId <= 0 ||
+    typeof identityKey !== "string" ||
     !identityKey ||
-    !signedPreKey?.publicKey ||
-    !signedPreKey?.signature ||
-    !Array.isArray(oneTimePreKeys)
+    !Number.isInteger(signedPreKey?.id) ||
+    typeof signedPreKey?.publicKey !== "string" ||
+    typeof signedPreKey?.signature !== "string" ||
+    !Array.isArray(oneTimePreKeys) ||
+    !oneTimePreKeys.every(
+      (opk: { id?: unknown; publicKey?: unknown }) =>
+        opk &&
+        Number.isInteger(opk.id) &&
+        typeof opk.publicKey === "string" &&
+        opk.publicKey.length > 0,
+    )
   ) {
     res.status(400).json({ error: "INVALID_BUNDLE" });
     return;
@@ -49,10 +59,17 @@ keysRouter.post("/:userId", async (req, res) => {
 
     await client.query("DELETE FROM one_time_prekey WHERE user_id = $1", [userId]);
 
-    for (const opk of oneTimePreKeys) {
+    if (oneTimePreKeys.length > 0) {
+      // Single multi-row insert instead of one round trip per OPK.
       await client.query(
-        "INSERT INTO one_time_prekey (user_id, id, public_key) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
-        [userId, String(opk.id), opk.publicKey],
+        `INSERT INTO one_time_prekey (user_id, id, public_key)
+         SELECT $1, unnest($2::text[]), unnest($3::text[])
+         ON CONFLICT DO NOTHING`,
+        [
+          userId,
+          oneTimePreKeys.map((opk: { id: number }) => String(opk.id)),
+          oneTimePreKeys.map((opk: { publicKey: string }) => opk.publicKey),
+        ],
       );
     }
 
@@ -60,6 +77,11 @@ keysRouter.post("/:userId", async (req, res) => {
     res.json({ ok: true, count: oneTimePreKeys.length });
   } catch (err) {
     await client.query("ROLLBACK");
+    // Foreign key violation: the userId does not exist in users.
+    if ((err as { code?: string }).code === "23503") {
+      res.status(404).json({ error: "USER_NOT_FOUND" });
+      return;
+    }
     console.error("publishKeys error:", err);
     res.status(500).json({ error: "INTERNAL" });
   } finally {

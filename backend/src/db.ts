@@ -8,6 +8,12 @@ export const pool = new Pool({
     "postgresql://postgres:postgres@localhost:5433/signal_poc",
 });
 
+// An idle client losing its connection (e.g. Postgres restart) emits 'error'
+// on the pool; without a listener that is an uncaught exception → crash.
+pool.on("error", (err) => {
+  console.error("[db] idle client error:", err.message);
+});
+
 /**
  * Schema init. Tables are created IF NOT EXISTS — safe to call on every boot.
  * The PoC seeds 3 users (alice, bob, carol) on first run.

@@ -6,6 +6,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: Number(process.env.PORT) || 3000,
+    proxy: {
+      '/keys': 'http://localhost:4000',
+      '/api': 'http://localhost:4000',
+    },
   },
   test: {
     // The signal module is pure TS with no DOM dependency.

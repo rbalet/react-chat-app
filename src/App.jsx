@@ -1,7 +1,7 @@
 import React, { Component } from 'react'
 import Login from './components/login/login'
 import ChatWindow from "./components/chatWindow/chatWindow";
-import { createSignalProtocolManager, SignalServerStore } from "./services/signal-gateway"
+import { createSignalProtocolManager } from "./services/signal-gateway"
 
 import './App.css';
 export default class ChatApp extends Component {
@@ -10,7 +10,6 @@ export default class ChatApp extends Component {
     this.state = {
       isLoggedIn: false,
       loggedInUserObj: {},
-      dummySignalServer: new SignalServerStore(),
       signalProtocolManagerUser: undefined
     }
     this.setLoggedinUser = this.setLoggedinUser.bind(this)
@@ -18,8 +17,7 @@ export default class ChatApp extends Component {
 
   setLoggedinUser(loggedInUserObj) {
     this.setState({ isLoggedIn: true, loggedInUserObj: { ...loggedInUserObj } }, () => {
-      // Initializing signal server here
-      createSignalProtocolManager(loggedInUserObj._id, loggedInUserObj.name, this.state.dummySignalServer)
+      createSignalProtocolManager(loggedInUserObj._id, loggedInUserObj.name)
         .then(signalProtocolManagerUser => {
           this.setState({ signalProtocolManagerUser: signalProtocolManagerUser })
         })

@@ -26,10 +26,13 @@ export default class ChatApp extends Component {
 
   render() {
 
+    // ChatWindow only mounts once the signal manager is ready: it opens the
+    // WebSocket in componentDidMount, and a message arriving before the
+    // manager exists could not be decrypted (it would be silently lost).
     return (
       <div className="App">
         { !this.state.isLoggedIn && <Login loginProp={this.setLoggedinUser} />}
-        { this.state.isLoggedIn && <ChatWindow
+        { this.state.isLoggedIn && this.state.signalProtocolManagerUser && <ChatWindow
           loggedInUserObj={this.state.loggedInUserObj}
           signalProtocolManagerUser={this.state.signalProtocolManagerUser}
         />}

@@ -33,11 +33,26 @@ export default class ChatWindow extends Component {
         this.setState({ chats: { ...lsChats } })
 
         // Web Socket Connection
+        this.connectWebSocket()
+    }
+
+    componentWillUnmount() {
+        this.unmounted = true
+        clearTimeout(this.reconnectTimer)
+        if (this.state.ws) this.state.ws.close()
+    }
+
+    // Opens the WebSocket and reconnects with backoff when it drops
+    // (backend restart, network hiccup). Without this, a dropped socket
+    // left the client permanently deaf: messages relayed meanwhile are
+    // dropped by the server (no offline queue).
+    connectWebSocket() {
         let ws = new WebSocket(`ws://localhost:4000/chat/${this.props.loggedInUserObj._id}`)
         console.log("New Web Socket Connection: ", ws);
 
         ws.onopen = () => {
             console.log("Connected Websocket main component.");
+            this.reconnectDelay = 1000
             this.setState({ ws: ws });
         }
 
@@ -49,8 +64,14 @@ export default class ChatWindow extends Component {
                 newMessage.message = this.state.lastSentMessage
             } else { // Otherwise decrypt it and then save to Chats
                 // Decryption using Signal Protocol
-                let decrytedMessage = await this.props.signalProtocolManagerUser.decryptMessageAsync(newMessage.senderid, newMessage.message)
-                newMessage.message = decrytedMessage
+                try {
+                    let decrytedMessage = await this.props.signalProtocolManagerUser.decryptMessageAsync(newMessage.senderid, newMessage.message)
+                    newMessage.message = decrytedMessage
+                } catch (error) {
+                    // Never drop a message silently — show the failure in the chat
+                    console.error("Failed to decrypt message from " + newMessage.senderid + ":", error)
+                    newMessage.message = "⚠️ [undecryptable message]"
+                }
             }
 
             // Update message data to Chats & LocalStorage -> 2 Scenarios
@@ -80,8 +101,11 @@ export default class ChatWindow extends Component {
         }
 
         ws.onclose = () => {
-            console.log("Disconnected Websocket main component.");
-            // redirect to login
+            if (this.unmounted) return
+            const delay = this.reconnectDelay || 1000
+            console.warn(`Websocket disconnected — reconnecting in ${delay}ms`);
+            this.reconnectTimer = setTimeout(() => this.connectWebSocket(), delay)
+            this.reconnectDelay = Math.min(delay * 2, 10000)
         }
     }
 
@@ -92,14 +116,21 @@ export default class ChatWindow extends Component {
 
     // Method to Send New Message using Web Socket when User hits send button from Message Box component
     async getNewMsgObj(newMsgObj) {
+        if (!this.state.ws || this.state.ws.readyState !== WebSocket.OPEN) {
+            console.error("Websocket not connected — message not sent");
+            return
+        }
         let selectedUserChatId = this.getSelectedUserChatId()
         let msgToSend = { chatId: selectedUserChatId, senderid: this.props.loggedInUserObj._id, receiverid: this.state.messageToUser._id, ...newMsgObj }
         // Send Message for Encryption to Signal Server, then send the Encrypted Message to Push server
         try {
             let encryptedMessage = await this.props.signalProtocolManagerUser.encryptMessageAsync(this.state.messageToUser._id, newMsgObj.message);
             msgToSend.message = encryptedMessage
-            this.state.ws.send(JSON.stringify(msgToSend))
-            this.setState({ lastSentMessage: newMsgObj.message }) // Storing last-sent message for Verification with Received Message
+            // Store last-sent plaintext BEFORE sending: the server echo can
+            // arrive before a post-send setState commits
+            this.setState({ lastSentMessage: newMsgObj.message }, () => {
+                this.state.ws.send(JSON.stringify(msgToSend))
+            })
         } catch (error) {
             console.log(error);
         }

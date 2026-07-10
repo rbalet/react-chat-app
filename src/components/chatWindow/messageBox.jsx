@@ -28,9 +28,10 @@ export default class MessageBox extends Component {
     // Method to Display Messages
     addMessagesToChat() {
         if (this.props.messages) {
-            const msgContent = this.props.messages.map(function (message) {
+            // Messages have no server-side id (append-only list) — the index is a stable key here.
+            const msgContent = this.props.messages.map(function (message, index) {
                 if (message.receiverid === this.props.selectedUser._id)
-                    return (<div key={message.messageId} className="outgoing w-3/4 justify-end float-right flex my-2">
+                    return (<div key={index} className="outgoing w-3/4 justify-end float-right flex my-2">
                         <div className=" w-max bg-gray-200 text-black shadow-lg clear-both p-2 rounded-md">
                             {message.message}</div>
                         <div className="w-16 rounded-full relative h-16 mx-2 px-2">
@@ -38,7 +39,7 @@ export default class MessageBox extends Component {
                         </div>
                     </div>)
                 else
-                    return (<div key={message.messageId} className="incoming w-3/4 flex my-2">
+                    return (<div key={index} className="incoming w-3/4 flex my-2">
                         <div className="w-16 rounded-full relative h-16 mx-2 px-2">
                             <img className="profile-picture absolute h-full object-cover self-center p-2" src={"/images/" + this.props.selectedUser.img} alt="dp" />
                         </div>

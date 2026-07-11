@@ -58,9 +58,9 @@ export async function initDb(): Promise<void> {
   if (rows[0].c === 0) {
     await pool.query(`
       INSERT INTO users (id, name, role, img) VALUES
-        ('alice', 'Alice', 'SOLO', '/images/user1.png'),
-        ('bob',   'Bob',   'SOLO', '/images/user2.png'),
-        ('carol', 'Carol', 'SOLO', '/images/user3.png')
+        ('alice', 'Alice', 'SOLO', 'user1.png'),
+        ('bob',   'Bob',   'SOLO', 'user2.png'),
+        ('carol', 'Carol', 'SOLO', 'user3.png')
       ON CONFLICT DO NOTHING;
     `);
   }

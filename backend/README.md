@@ -8,11 +8,11 @@ key server of the frontend (see `BRIEF.md` §9 at the repo root).
 
 ```bash
 docker compose up -d     # PostgreSQL 16 on :5433 (named volume pgdata)
-npm install
-npm run dev              # tsx watch, http://localhost:4000
+pnpm install
+pnpm run dev             # tsx watch, http://localhost:4000
 ```
 
-The frontend (repo root, `npm run dev`) proxies `/keys` and `/api` to :4000;
+The frontend (repo root, `pnpm run dev`) proxies `/keys` and `/api` to :4000;
 the WebSocket connects directly to `ws://localhost:4000/chat/:userId`.
 
 ## Endpoints
@@ -40,7 +40,7 @@ Tables are `CREATE TABLE IF NOT EXISTS` on boot; data lives in the
 ## Tests
 
 ```bash
-npm test      # 13 Vitest + supertest tests (needs the Postgres container)
+pnpm test     # 13 Vitest + supertest tests (needs the Postgres container)
 ```
 
 Covers CRUD, upsert, validation, OPK exhaustion, 10-way concurrent OPK

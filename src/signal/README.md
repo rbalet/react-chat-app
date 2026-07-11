@@ -11,7 +11,7 @@ specifications at <https://signal.org/docs/>.
 ## Status
 
 - ✅ Phase 1: core crypto, X3DH, Double Ratchet, sessions, store, facade —
-  implemented and covered by the Vitest suite (`npm test`).
+  implemented and covered by the Vitest suite (`pnpm test`).
 - ✅ Backend key-server endpoints + WS relay (`backend/`, PostgreSQL) and
   HTTP `KeyServerClient` (`src/services/http-key-server.ts`) — verified
   end-to-end with two isolated clients.
@@ -34,8 +34,8 @@ specifications at <https://signal.org/docs/>.
 ## Constraints
 
 - **Framework-agnostic**: no React, Angular, DOM or Node-specific imports.
-  App glue (localStorage dummy server, UI naming) lives in
-  `src/services/signal-gateway.ts`, outside this module.
+  App glue (fetch-based key server client, legacy UI naming) lives in
+  `src/services/`, outside this module.
 - **Browser/WebView-safe**: pure TypeScript, no native bindings.
 - Crypto primitives exclusively from [`@noble/curves`](https://github.com/paulmillr/noble-curves),
   [`@noble/hashes`](https://github.com/paulmillr/noble-hashes),

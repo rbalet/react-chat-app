@@ -1,25 +1,27 @@
-# A Secure Chat Application using React and the Signal Protocol
+# Secure Chat PoC — from-scratch Signal Protocol in TypeScript
 
-> **⚠️ 2026 — Repurposed as a Signal Protocol PoC.** This repo now hosts a
-> **from-scratch, clean-room TypeScript implementation** of the Signal
-> Protocol (X3DH + Double Ratchet) in [`src/signal/`](src/signal/README.md),
-> built on `@noble` crypto and licensed Apache-2.0. The old vendored
-> `libsignal-protocol.js` (GPL) is gone, and the build moved from
-> Create React App to **Vite** (`npm run dev`, tests with `npm test`).
-> Read **[BRIEF.md](BRIEF.md)** for the plan; the sections below describe
-> the original 2021 demo app and are partially outdated.
+A React chat application whose end-to-end encryption is a **clean-room
+TypeScript implementation of the Signal Protocol** — X3DH, Double Ratchet
+and Sender Keys (groups) — living in [`src/signal/`](src/signal/README.md),
+built exclusively on [`@noble`](https://paulmillr.com/noble/) crypto and
+licensed **Apache-2.0**. No code from `libsignal` (AGPL/GPL) is used.
 
-## Run the PoC (3 processes)
+**[BRIEF.md](BRIEF.md)** is the project's source of truth (context, legal
+constraints, design, phase plan). The protocol module is developed here
+(Phases 0–2, done) and will be extracted to its own npm package
+(`@up4it/signal-protocol`, Phase 3).
+
+## Quick start (3 processes, pnpm)
 
 ```bash
-# 1. PostgreSQL
+# 1. PostgreSQL 16 (port 5433)
 cd backend && docker compose up -d
 
 # 2. Prekey server + WS relay on :4000
-cd backend && npm install && npm run dev
+cd backend && pnpm install && pnpm run dev
 
 # 3. Frontend (Vite, proxies /keys and /api to :4000)
-npm install && npm run dev
+pnpm install && pnpm run dev
 ```
 
 Open two different browsers (or two tabs — the in-memory signal store is
@@ -30,51 +32,39 @@ client auto-reconnects its WebSocket (1s→10s backoff) when the backend
 restarts; messages relayed while a peer is disconnected are dropped
 (no offline queue — PoC).
 
-## Technology Stack
-1. ReactJS library for UI
-2. Signal Protocol Implementation for E2EE — from-scratch module in `src/signal/`
-3. Axios for AJAX calls
-4. LocalStorage to store/fetch Chats/Conversations (prekeys now live in PostgreSQL)
-5. Web Sockets Implementation for Instant Messaging
+## Layout
 
-## Components
-1. Login
-2. Chat Window
-    1. Contact List
-    2. Message Box
+| Path | What it is |
+| ---- | ---------- |
+| [`src/signal/`](src/signal/README.md) | The deliverable: framework-agnostic Signal Protocol module (X3DH, Double Ratchet, Sender Keys, stores, `SignalProtocolManager` facade). Apache-2.0. |
+| [`backend/`](backend/README.md) | PoC backend: Express 5 + PostgreSQL prekey server (atomic one-time-prekey consumption) + stateless WebSocket relay. |
+| `src/components/`, `src/services/` | Demo UI (React 17, 2021-era chat app) and its glue: `signal-gateway.ts` (legacy method names), `http-key-server.ts` (`KeyServerClient` over fetch). |
 
-## Axios Calls
-1. GET - api/users/login/userName - Returns User Object of the given User
-2. GET - api/users/users/userId/role - Returns Users Array other than the given User with given role
+## Tests
 
-## Web Sockets
-1. Establishing WS Connection: `let webSocket = new WebSocket("ws://localhost:4000/chat/<userId>")`
-2. Event Listeners of the webSocket Object:
-```
-    webSocket.onopen = () => {
-        console.log(‘WebSocket Client Connected’);
-        webSocket.send('Hi this is web client.');
-    };
-    webSocket.onmessage = (e) => {
-        console.log(‘Received: ’ + e.data);
-    };
-    webSocket.close = () => {
-        console.log('WebSocket Client Closed.’);
-    };
+```bash
+pnpm run test        # frontend + protocol module (Vitest)
+cd backend && pnpm run test   # supertest suite (needs the Postgres container)
 ```
 
-## Signal Protocol Implementation
-1. InMemorySignalProtocolStore.js (and helpers.js) are taken for storage purpose from Signal Github (link mentioned in resources)
-2. libsignal-protocol.js (also from Signal Github) implements the protocol
-3. Signal Gateway - Created by me to integrate React with Signal. It performs the Initialization, Encryption and Decryption functionality when required on Frontend. Check the file in src/signal/SignalGateway.js for detailed code.
+The protocol suite covers RFC vectors (7748, 8032, 5869, 4648), protocol
+correctness (out-of-order, replay, tampering, TOFU, forward secrecy,
+concurrent-initiation tie-break, per-peer serialization) and group
+messaging (rotation transition, skipped keys, SKDM forgery/TOFU). The
+backend suite proves atomic OPK consumption under concurrency.
 
-**Note:** If you do not clear local storage, then you can recover your old conversations post re-login since these are saved in their respective decrypted form. No data is stored on the server. Kindly view the tutorial for more details.
+## Status
 
-## Resources
-1. [Complete YouTube Tutorial for this project](https://www.youtube.com/watch?v=gNbdgIznjhU&ab_channel=QED42)
-2. [Complete Blog for this project](https://www.qed42.com/blog/developing-real-time-secure-chat-application-like-whatsapp-or-signal-with-end-end-encryption)
-3. [Backend - NodeJS](https://github.com/VertikaJain/node-express-ts-chat-app)
-4. [Signal Protocol in JavaScript Github](https://github.com/signalapp/libsignal-protocol-javascript)
-5. [Why Axios](https://medium.com/@MinimalGhost/what-is-axios-js-and-why-should-i-care-7eb72b111dc0)
-6. [ReactJS](https://reactjs.org/)
-7. [Web Sockets API](https://developer.mozilla.org/en-US/docs/Web/API/Websockets_API)
+- ✅ Phase 0 — old GPL `libsignal-protocol.js` removed, TypeScript + Vite toolchain, versions pinned exact.
+- ✅ Phase 1 — X3DH + Double Ratchet + sessions + stores + facade; backend prekey server; verified end-to-end across two isolated clients.
+- ✅ Phase 2 — Sender Keys: identity-signed SKDMs, per-message signatures, multi-state rotation, skipped message keys.
+- ⬜ Phase 3 — extraction to its own repo / npm publish, SPK rotation + OPK replenishment, Sesame (multi-device).
+
+## Provenance
+
+The UI shell descends from a 2021 demo chat app by QED42
+([tutorial](https://www.youtube.com/watch?v=gNbdgIznjhU&ab_channel=QED42),
+[blog](https://www.qed42.com/blog/developing-real-time-secure-chat-application-like-whatsapp-or-signal-with-end-end-encryption)),
+originally paired with the archived `libsignal-protocol-javascript`. The
+protocol implementation, backend and toolchain in this repo are new; the
+old vendored library and its storage helpers are gone.

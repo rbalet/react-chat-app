@@ -11,9 +11,13 @@ export default class ChatWindow extends Component {
             users: [],
             messageToUser: "",
             ws: null,
-            chats: {},
-            lastSentMessage: undefined
+            chats: {}
         }
+        // FIFO of plaintexts awaiting their server echo. The relay preserves
+        // per-connection order, so shift() pairs each echo with its plaintext
+        // even when several messages are sent in quick succession (a single
+        // "last sent" slot showed the wrong text for all but the newest).
+        this.pendingSentMessages = []
         this.getSelectedUser = this.getSelectedUser.bind(this)
         this.getNewMsgObj = this.getNewMsgObj.bind(this)
     }
@@ -61,7 +65,7 @@ export default class ChatWindow extends Component {
             // In case message is from self, save state-stored message to Chats i.e. no need of using/decrypting the received message
             // This is only for verifying that the messages have successfully been received.
             if (newMessage.senderid === this.props.loggedInUserObj._id) {
-                newMessage.message = this.state.lastSentMessage
+                newMessage.message = this.pendingSentMessages.shift() ?? "⚠️ [echo without pending message]"
             } else { // Otherwise decrypt it and then save to Chats
                 // Decryption using Signal Protocol
                 try {
@@ -126,11 +130,9 @@ export default class ChatWindow extends Component {
         try {
             let encryptedMessage = await this.props.signalProtocolManagerUser.encryptMessageAsync(this.state.messageToUser._id, newMsgObj.message);
             msgToSend.message = encryptedMessage
-            // Store last-sent plaintext BEFORE sending: the server echo can
-            // arrive before a post-send setState commits
-            this.setState({ lastSentMessage: newMsgObj.message }, () => {
-                this.state.ws.send(JSON.stringify(msgToSend))
-            })
+            // Queue the plaintext BEFORE sending so the echo always finds it.
+            this.pendingSentMessages.push(newMsgObj.message)
+            this.state.ws.send(JSON.stringify(msgToSend))
         } catch (error) {
             console.log(error);
         }

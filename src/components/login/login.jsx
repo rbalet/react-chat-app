@@ -31,7 +31,9 @@ export default class Login extends Component {
         return (
             <div className="bg-gray-900">
                 <div className="login container mx-auto w-full max-w-xs items-center pt-12 h-screen">
-                    <form action="chat.html" method="GET" className="bg-white shadow-md rounded px-8 pt-8 pb-8 m-4">
+                    {/* preventDefault: a bare submit (Enter in the input) would
+                        navigate to action= and reload the page, losing the login */}
+                    <form onSubmit={(e) => { e.preventDefault(); this.login() }} className="bg-white shadow-md rounded px-8 pt-8 pb-8 m-4">
                         <label className="block text-lg font-bold mb-4 py-2 text-center bg-gray-800 rounded text-white">Healthcare Chat Login</label>
                         <div className="mb-4">
                             <label className="block text-gray-700 text-sm font-bold mb-2">

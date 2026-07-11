@@ -20,8 +20,28 @@ export interface GroupMessage {
   iteration: number;
   distributionId: string;
   senderId: string;
-  /** Ed25519 signature over (iteration || ciphertext || distributionId) by the chain signing key. */
+  /** Ed25519 signature by the chain signing key (see groupMessageSignatureSource). */
   signature: string;
+}
+
+/**
+ * The byte string the chain signing key signs. Variable-length fields carry
+ * a u32 length prefix so distinct (ciphertext, distributionId) tuples can
+ * never concatenate to the same bytes.
+ */
+function groupMessageSignatureSource(
+  iteration: number,
+  ciphertext: Uint8Array,
+  distributionId: string,
+): Uint8Array {
+  const distributionIdBytes = utf8ToBytes(distributionId);
+  return concatBytes(
+    u32ToBytes(iteration),
+    u32ToBytes(ciphertext.length),
+    ciphertext,
+    u32ToBytes(distributionIdBytes.length),
+    distributionIdBytes,
+  );
 }
 
 export class GroupCipher {
@@ -54,8 +74,7 @@ export class GroupCipher {
     const encrypted = aeadEncrypt(params.key, params.nonce, utf8ToBytes(plaintext), ad);
 
     // Per-message Ed25519 signature by the chain's signing key (libsignal §SenderKeyMessage).
-    const sigSource = concatBytes(u32ToBytes(iteration), encrypted, utf8ToBytes(state.distributionId));
-    const sig = state.signMessage(sigSource);
+    const sig = state.signMessage(groupMessageSignatureSource(iteration, encrypted, state.distributionId));
 
     await this.persistRecord(senderId, record);
 
@@ -91,13 +110,12 @@ export class GroupCipher {
 
     // Verify per-message signature BEFORE decrypting (libsignal authenticates each SKM).
     const ciphertext = base64ToBytes(message.ciphertext);
-    const sig = base64ToBytes(message.signature);
-    const sigSource = concatBytes(
-      u32ToBytes(message.iteration),
+    const sigSource = groupMessageSignatureSource(
+      message.iteration,
       ciphertext,
-      utf8ToBytes(message.distributionId),
+      message.distributionId,
     );
-    if (!verify(state.signingKey.publicKey, sigSource, sig)) {
+    if (!verify(state.signingKey.publicKey, sigSource, base64ToBytes(message.signature))) {
       throw new Error('Invalid group message signature');
     }
 

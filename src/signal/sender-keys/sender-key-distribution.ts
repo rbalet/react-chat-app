@@ -19,6 +19,32 @@ export interface SerializedSKDM {
 }
 
 /**
+ * The byte string the identity key signs. Variable-length fields carry a
+ * u32 length prefix so no two distinct field tuples can concatenate to the
+ * same bytes (no ambiguity between e.g. senderId and distributionId).
+ */
+function skdmSignatureSource(
+  senderId: string,
+  identityPublicKey: Uint8Array,
+  distributionId: string,
+  iteration: number,
+  chainKey: Uint8Array,
+): Uint8Array {
+  const senderIdBytes = utf8ToBytes(senderId);
+  const distributionIdBytes = utf8ToBytes(distributionId);
+  return concatBytes(
+    SKDM_DOMAIN,
+    u32ToBytes(senderIdBytes.length),
+    senderIdBytes,
+    identityPublicKey,
+    u32ToBytes(distributionIdBytes.length),
+    distributionIdBytes,
+    u32ToBytes(iteration),
+    chainKey,
+  );
+}
+
+/**
  * Create a SenderKeyDistributionMessage signed with the sender's long-term
  * identity key. The recipient verifies against the stored remote identity
  * so only the real owner of the identity key can create a valid SKDM.
@@ -29,12 +55,11 @@ export function createSKDM(
   identityPrivateKey: Uint8Array,
   identityPublicKey: Uint8Array,
 ): SerializedSKDM {
-  const source = concatBytes(
-    SKDM_DOMAIN,
-    utf8ToBytes(senderId),
+  const source = skdmSignatureSource(
+    senderId,
     identityPublicKey,
-    utf8ToBytes(state.distributionId),
-    u32ToBytes(state.iteration),
+    state.distributionId,
+    state.iteration,
     state.chainKey,
   );
   return {
@@ -54,17 +79,14 @@ export function createSKDM(
  */
 export function verifySKDM(skdm: SerializedSKDM, identityPublicKey: Uint8Array): boolean {
   try {
-    const chainKey = base64ToBytes(skdm.chainKey);
-    const sig = base64ToBytes(skdm.signature);
-    const source = concatBytes(
-      SKDM_DOMAIN,
-      utf8ToBytes(skdm.senderId),
+    const source = skdmSignatureSource(
+      skdm.senderId,
       identityPublicKey,
-      utf8ToBytes(skdm.distributionId),
-      u32ToBytes(skdm.iteration),
-      chainKey,
+      skdm.distributionId,
+      skdm.iteration,
+      base64ToBytes(skdm.chainKey),
     );
-    return verify(identityPublicKey, source, sig);
+    return verify(identityPublicKey, source, base64ToBytes(skdm.signature));
   } catch {
     return false;
   }

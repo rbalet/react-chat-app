@@ -4,6 +4,21 @@
 > Any developer or AI agent picking up this work should read this document
 > in full before writing any code.
 
+> **Status (2026-07-11)** — Phases 0, 1 and 2 are **done** on branch
+> `feat/ts-signal-from-scratch`; Phase 3 (extraction/npm) is next.
+> Divergences from the plan below, decided along the way:
+> - The PoC backend (§9) was built **inside this repo** under `backend/`
+>   (Express 5 + PostgreSQL + WS relay), not in the separate
+>   `node-express-ts-chat-app` repo.
+> - Toolchain: CRA was replaced by **Vite + Vitest**, npm by **pnpm**;
+>   all versions pinned exact.
+> - @noble v2 API differs from the §6 mapping table (import paths,
+>   `keygen()`, Edwards→Montgomery names) — see `src/signal/README.md`.
+> - Group messaging goes beyond the §11 plan: identity-signed SKDMs,
+>   per-message signatures, multi-state rotation, skipped message keys.
+>   Groups are demonstrated at the module level (102 frontend + 13
+>   backend Vitest tests overall); the demo UI itself remains 1:1.
+
 ---
 
 ## 1. Context

@@ -24,13 +24,52 @@ cd backend && pnpm install && pnpm run dev
 pnpm install && pnpm run dev
 ```
 
-Open two different browsers (or two tabs — the in-memory signal store is
-per-tab), log in as `Alice` and `Bob`, and chat. Prekeys live in
-PostgreSQL ([backend/README.md](backend/README.md)); messages transit
-encrypted through the WS relay and are never stored server-side. The
-client auto-reconnects its WebSocket (1s→10s backoff) when the backend
-restarts; messages relayed while a peer is disconnected are dropped
-(no offline queue — PoC).
+Vite serves on **:3000, or the next free port** (e.g. :3001 if another
+app holds 3000 — watch the terminal output). Open two different browsers
+(or two tabs — the in-memory signal store is per-tab), log in as `Alice`
+and `Bob` (or `Carol`), and chat.
+
+## What the PoC demonstrates
+
+- **1:1 end-to-end encryption**: sessions bootstrap asynchronously via
+  **X3DH** (signed + one-time prekeys fetched from the server), then run
+  the **Double Ratchet** — per-message **forward secrecy** (a compromised
+  key never decrypts past messages) and **post-compromise security**
+  (fresh DH entropy every round trip).
+- **Group messaging** (module level, exercised by the test suite): **Sender
+  Keys** with identity-signed distribution messages, per-message Ed25519
+  signatures, key rotation that keeps in-flight messages decryptable, and
+  skipped-key handling for out-of-order delivery.
+- **Server holds no secrets**: it stores public prekey bundles (one-time
+  prekeys consumed atomically under concurrency) and relays opaque
+  ciphertext; plaintext never leaves the clients. Trust is TOFU — an
+  identity key change is refused until the app clears the pin.
+- **Robust transport**: the client auto-reconnects its WebSocket (1s→10s
+  backoff) across backend restarts. Messages relayed while a peer is
+  offline are dropped (no offline queue — PoC).
+
+## Architecture
+
+```
+┌────────────── Browser A ─────────────┐        ┌───── Browser B ─────┐
+│ React UI (2021 demo shell)           │        │        idem         │
+│   └─ services/signal-gateway.ts      │        └─────────┬───────────┘
+│       └─ src/signal/  ← the module   │                  │
+│           SignalProtocolManager      │                  │
+│           X3DH · Double Ratchet ·    │                  │
+│           Sender Keys · stores       │                  │
+└──────┬─────────────────────┬─────────┘                  │
+       │ HTTP /keys, /api    │ WS /chat/:userId           │
+       ▼                     ▼                            ▼
+┌─────────────────────── backend/ (Express 5) ────────────────────────┐
+│  prekey server ──► PostgreSQL 16       WS relay (stateless,         │
+│  (atomic OPK consume)  (docker)        no message storage)          │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+The module is framework-agnostic (zero React/DOM imports) and talks to
+the outside world only through the injected `KeyServerClient` interface —
+the same code runs in the browser UI and in headless Node test clients.
 
 ## Layout
 
@@ -60,7 +99,15 @@ backend suite proves atomic OPK consumption under concurrency.
 - ✅ Phase 2 — Sender Keys: identity-signed SKDMs, per-message signatures, multi-state rotation, skipped message keys.
 - ⬜ Phase 3 — extraction to its own repo / npm publish, SPK rotation + OPK replenishment, Sesame (multi-device).
 
-## Provenance
+## License & provenance
+
+The protocol module (`src/signal/`) is **Apache-2.0**
+([LICENSE](src/signal/LICENSE)) and a **clean-room implementation**: written
+solely from the Signal specifications at <https://signal.org/docs/>, each of
+which is placed in the public domain by its authors. No code was copied,
+ported or translated from `libsignal` (AGPL-3.0) or any GPL implementation.
+"Signal Protocol" is used descriptively; this project is not affiliated with
+Signal Messenger LLC.
 
 The UI shell descends from a 2021 demo chat app by QED42
 ([tutorial](https://www.youtube.com/watch?v=gNbdgIznjhU&ab_channel=QED42),

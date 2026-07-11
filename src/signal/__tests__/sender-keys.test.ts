@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { utf8ToBytes, bytesToBase64, base64ToBytes } from '../core/utils';
 import { generateSigningKeyPair } from '../core/crypto';
+import { MAX_SKIPPED_KEYS_STORED } from '../core/constants';
 import { InMemorySignalProtocolStore } from '../store/in-memory-store';
 import { SenderKeyState } from '../sender-keys/sender-key-state';
+import { SenderKeyRecord, MAX_SENDER_KEY_STATES } from '../sender-keys/sender-key-record';
 import {
   createSKDM,
   verifySKDM,
@@ -270,20 +272,54 @@ describe('GroupCipher', () => {
     });
   });
 
-  describe('stale distribution', () => {
-    it('rejects messages with an old distributionId after rotation', async () => {
+  describe('rotation transition (multi-state record)', () => {
+    it('keeps decrypting in-flight messages from the pre-rotation chain', async () => {
+      const aliceStore = new InMemorySignalProtocolStore();
+      const bobStore = new InMemorySignalProtocolStore();
+      const aliceCipher = new GroupCipher(aliceStore, GROUP_ID);
+      const bobCipher = new GroupCipher(bobStore, GROUP_ID);
       const identity = generateSigningKeyPair();
 
-      // Alice's first key — rotate stores the state and returns the SKDM.
-      await cipher.rotate('alice', identity.privateKey, identity.publicKey);
-      const msg = await cipher.encrypt('alice', 'under key v1');
+      const skdm1 = await aliceCipher.rotate('alice', identity.privateKey, identity.publicKey);
+      await bobCipher.processDistributionMessage('alice', skdm1, identity.publicKey);
 
-      // Rotate again — stores a fresh state with a new distributionId,
-      // replacing the previous one in the store.
-      await cipher.rotate('alice', identity.privateKey, identity.publicKey);
+      // In flight under chain v1 while Alice rotates.
+      const inFlight = await aliceCipher.encrypt('alice', 'sent before rotation');
 
-      // The old message carries distributionId v1; the store now has v2.
-      await expect(cipher.decrypt(msg)).rejects.toThrow('Distribution mismatch');
+      const skdm2 = await aliceCipher.rotate('alice', identity.privateKey, identity.publicKey);
+      await bobCipher.processDistributionMessage('alice', skdm2, identity.publicKey);
+      expect(skdm2.distributionId).not.toBe(skdm1.distributionId);
+
+      // New messages use the new chain…
+      const afterRotation = await aliceCipher.encrypt('alice', 'sent after rotation');
+      expect(afterRotation.distributionId).toBe(skdm2.distributionId);
+      expect(await bobCipher.decrypt(afterRotation)).toBe('sent after rotation');
+
+      // …and the in-flight v1 message still decrypts during the transition.
+      expect(inFlight.distributionId).toBe(skdm1.distributionId);
+      expect(await bobCipher.decrypt(inFlight)).toBe('sent before rotation');
+    });
+
+    it('evicts the oldest chain beyond MAX_SENDER_KEY_STATES rotations', async () => {
+      const aliceStore = new InMemorySignalProtocolStore();
+      const bobStore = new InMemorySignalProtocolStore();
+      const aliceCipher = new GroupCipher(aliceStore, GROUP_ID);
+      const bobCipher = new GroupCipher(bobStore, GROUP_ID);
+      const identity = generateSigningKeyPair();
+
+      const skdm1 = await aliceCipher.rotate('alice', identity.privateKey, identity.publicKey);
+      await bobCipher.processDistributionMessage('alice', skdm1, identity.publicKey);
+      const oldMessage = await aliceCipher.encrypt('alice', 'from the first chain');
+
+      // MAX_SENDER_KEY_STATES further rotations push chain v1 out (FIFO).
+      for (let i = 0; i < MAX_SENDER_KEY_STATES; i++) {
+        const skdm = await aliceCipher.rotate('alice', identity.privateKey, identity.publicKey);
+        await bobCipher.processDistributionMessage('alice', skdm, identity.publicKey);
+      }
+
+      await expect(bobCipher.decrypt(oldMessage)).rejects.toThrow(
+        'No sender key state for distribution',
+      );
     });
   });
 
@@ -310,7 +346,7 @@ describe('GroupCipher', () => {
       expect(await bobCipher.decrypt(messages[2]!)).toBe('msg-2');
     });
 
-    it('rejects messages whose iteration is behind the current chain', async () => {
+    it('decrypts out-of-order messages via skipped keys, one-shot', async () => {
       const aliceStore = new InMemorySignalProtocolStore();
       const bobStore = new InMemorySignalProtocolStore();
       const aliceCipher = new GroupCipher(aliceStore, GROUP_ID);
@@ -323,12 +359,66 @@ describe('GroupCipher', () => {
 
       const m0 = await aliceCipher.encrypt('alice', 'zero');
       const m1 = await aliceCipher.encrypt('alice', 'one');
+      const m2 = await aliceCipher.encrypt('alice', 'two');
 
-      // m1 arrives first — the chain fast-forwards to match its iteration.
+      // m2 arrives first — iterations 0 and 1 are skipped and their keys stored.
+      expect(await bobCipher.decrypt(m2)).toBe('two');
+
+      // Late arrivals decrypt from the stored skipped keys, in any order.
+      expect(await bobCipher.decrypt(m0)).toBe('zero');
       expect(await bobCipher.decrypt(m1)).toBe('one');
 
-      // m0 is now behind the chain (already skipped) and is rejected.
-      await expect(bobCipher.decrypt(m0)).rejects.toThrow();
+      // Skipped keys are one-shot: replays are rejected.
+      await expect(bobCipher.decrypt(m0)).rejects.toThrow('already processed');
+      await expect(bobCipher.decrypt(m2)).rejects.toThrow('already processed');
+    });
+
+    it('rejects a jump beyond MAX_GROUP_SKIP iterations', async () => {
+      const aliceStore = new InMemorySignalProtocolStore();
+      const bobStore = new InMemorySignalProtocolStore();
+      const aliceCipher = new GroupCipher(aliceStore, GROUP_ID);
+      const bobCipher = new GroupCipher(bobStore, GROUP_ID);
+      const identity = generateSigningKeyPair();
+
+      const skdm = await aliceCipher.rotate('alice', identity.privateKey, identity.publicKey);
+      await bobCipher.processDistributionMessage('alice', skdm, identity.publicKey);
+
+      // Fast-forward Alice's chain far ahead of Bob (25 001 iterations),
+      // dropping the skipped keys her state accumulates along the way.
+      const raw = await aliceStore.loadSenderKey(GROUP_ID, 'alice');
+      const record = SenderKeyRecord.deserialize(JSON.parse(raw!));
+      record.current().skipTo(25001);
+      record.current().skippedMessageKeys.clear();
+      await aliceStore.storeSenderKey(GROUP_ID, 'alice', JSON.stringify(record.serialize()));
+
+      const tooFar = await aliceCipher.encrypt('alice', 'way ahead');
+      expect(tooFar.iteration).toBe(25001);
+      await expect(bobCipher.decrypt(tooFar)).rejects.toThrow('Too many skipped group messages');
+    });
+  });
+
+  describe('skipped key memory bound', () => {
+    it('evicts the oldest skipped keys FIFO beyond MAX_SKIPPED_KEYS_STORED', () => {
+      const state = SenderKeyState.create();
+      state.skipTo(MAX_SKIPPED_KEYS_STORED + 5);
+
+      expect(state.skippedMessageKeys.size).toBe(MAX_SKIPPED_KEYS_STORED);
+      // Iterations 0..4 were evicted; everything after is present.
+      expect(state.takeSkippedKey(4)).toBeUndefined();
+      expect(state.takeSkippedKey(5)).toBeDefined();
+      expect(state.takeSkippedKey(MAX_SKIPPED_KEYS_STORED + 4)).toBeDefined();
+    });
+
+    it('skipped keys survive serialization', () => {
+      const state = SenderKeyState.create();
+      state.skipTo(3);
+      const restored = SenderKeyState.deserialize(state.serialize());
+
+      expect(restored.skippedMessageKeys.size).toBe(3);
+      const fromOriginal = state.takeSkippedKey(1)!;
+      const fromRestored = restored.takeSkippedKey(1)!;
+      expect(fromRestored.key).toEqual(fromOriginal.key);
+      expect(fromRestored.nonce).toEqual(fromOriginal.nonce);
     });
   });
 
@@ -366,11 +456,11 @@ describe('GroupCipher', () => {
     });
 
     it('sender keys are isolated by senderId within the same store', async () => {
-      const aliceState = SenderKeyState.create();
-      const bobState = SenderKeyState.create();
+      const aliceRecord = SenderKeyRecord.create();
+      const bobRecord = SenderKeyRecord.create();
 
-      await store.storeSenderKey(GROUP_ID, 'alice', JSON.stringify(aliceState.serialize()));
-      await store.storeSenderKey(GROUP_ID, 'bob', JSON.stringify(bobState.serialize()));
+      await store.storeSenderKey(GROUP_ID, 'alice', JSON.stringify(aliceRecord.serialize()));
+      await store.storeSenderKey(GROUP_ID, 'bob', JSON.stringify(bobRecord.serialize()));
 
       const aliceRaw = await store.loadSenderKey(GROUP_ID, 'alice');
       const bobRaw = await store.loadSenderKey(GROUP_ID, 'bob');
@@ -379,12 +469,54 @@ describe('GroupCipher', () => {
       expect(bobRaw).toBeDefined();
       expect(aliceRaw).not.toBe(bobRaw);
 
-      const loadedAlice = SenderKeyState.deserialize(JSON.parse(aliceRaw!));
-      const loadedBob = SenderKeyState.deserialize(JSON.parse(bobRaw!));
+      const loadedAlice = SenderKeyRecord.deserialize(JSON.parse(aliceRaw!));
+      const loadedBob = SenderKeyRecord.deserialize(JSON.parse(bobRaw!));
 
-      expect(loadedAlice.chainKey).toEqual(aliceState.chainKey);
-      expect(loadedBob.chainKey).toEqual(bobState.chainKey);
-      expect(loadedAlice.distributionId).not.toBe(loadedBob.distributionId);
+      expect(loadedAlice.current().chainKey).toEqual(aliceRecord.current().chainKey);
+      expect(loadedBob.current().chainKey).toEqual(bobRecord.current().chainKey);
+      expect(loadedAlice.current().distributionId).not.toBe(loadedBob.current().distributionId);
+    });
+  });
+
+  describe('SenderKeyRecord', () => {
+    it('create() starts with a single state, exposed as current()', () => {
+      const record = SenderKeyRecord.create();
+      expect(record.size()).toBe(1);
+      expect(record.current().distributionId).toBeTypeOf('string');
+    });
+
+    it('add() appends the newest state and evicts FIFO beyond the cap', () => {
+      const record = SenderKeyRecord.create();
+      const first = record.current();
+      const added: SenderKeyState[] = [];
+      for (let i = 0; i < MAX_SENDER_KEY_STATES; i++) {
+        const state = SenderKeyState.create();
+        added.push(state);
+        record.add(state);
+      }
+
+      expect(record.size()).toBe(MAX_SENDER_KEY_STATES);
+      expect(record.find(first.distributionId)).toBeUndefined(); // evicted
+      expect(record.current().distributionId).toBe(added[added.length - 1]!.distributionId);
+      for (const state of added) {
+        expect(record.find(state.distributionId)).toBeDefined();
+      }
+    });
+
+    it('round-trips through serialization', () => {
+      const record = SenderKeyRecord.create();
+      record.add(SenderKeyState.create());
+      const restored = SenderKeyRecord.deserialize(record.serialize());
+      expect(restored.size()).toBe(2);
+      expect(restored.current().distributionId).toBe(record.current().distributionId);
+    });
+
+    it('deserializes a legacy single-state payload by wrapping it', () => {
+      const state = SenderKeyState.create();
+      const record = SenderKeyRecord.deserialize(state.serialize());
+      expect(record.size()).toBe(1);
+      expect(record.current().distributionId).toBe(state.distributionId);
+      expect(record.current().chainKey).toEqual(state.chainKey);
     });
   });
 
@@ -429,12 +561,35 @@ describe('GroupCipher', () => {
 
       const raw = await store.loadSenderKey(GROUP_ID, 'alice');
       expect(raw).toBeDefined();
-      const stored = SenderKeyState.deserialize(JSON.parse(raw!));
+      const stored = SenderKeyRecord.deserialize(JSON.parse(raw!)).find(state.distributionId)!;
       expect(stored.chainKey).toEqual(state.chainKey);
       expect(stored.distributionId).toBe(state.distributionId);
       expect(stored.signingKey.publicKey).toEqual(state.signingKey.publicKey);
       // Only the public half of the signing key is stored for decryption.
       expect(stored.signingKey.privateKey).toEqual(new Uint8Array(0));
+    });
+
+    it('a second SKDM adds a chain instead of replacing the record', async () => {
+      const identity = generateSigningKeyPair();
+      const s1 = SenderKeyState.create();
+      const s2 = SenderKeyState.create();
+      await cipher.processDistributionMessage(
+        'alice',
+        createSKDM('alice', s1, identity.privateKey, identity.publicKey),
+        identity.publicKey,
+      );
+      await cipher.processDistributionMessage(
+        'alice',
+        createSKDM('alice', s2, identity.privateKey, identity.publicKey),
+        identity.publicKey,
+      );
+
+      const record = SenderKeyRecord.deserialize(
+        JSON.parse((await store.loadSenderKey(GROUP_ID, 'alice'))!),
+      );
+      expect(record.size()).toBe(2);
+      expect(record.find(s1.distributionId)).toBeDefined();
+      expect(record.current().distributionId).toBe(s2.distributionId);
     });
   });
 

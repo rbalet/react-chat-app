@@ -1,8 +1,8 @@
 # @up4it/signal-protocol
 
 Clean-room TypeScript implementation of the **Signal Protocol** — X3DH,
-Double Ratchet (Sender Keys coming in Phase 2) — written from the
-public-domain specifications at <https://signal.org/docs/>.
+Double Ratchet, Sender Keys (groups) — written from the public-domain
+specifications at <https://signal.org/docs/>.
 
 > Developed inside `react-chat-app` (Phase 1), to be extracted to its own
 > repo and published on npm (Phase 3). See `BRIEF.md` at the repo root for
@@ -15,7 +15,10 @@ public-domain specifications at <https://signal.org/docs/>.
 - ✅ Backend key-server endpoints + WS relay (`backend/`, PostgreSQL) and
   HTTP `KeyServerClient` (`src/services/http-key-server.ts`) — verified
   end-to-end with two isolated clients.
-- ⬜ Phase 2: Sender Keys (groups).
+- ✅ Phase 2: Sender Keys — per-sender chains with identity-signed SKDMs,
+  per-message Ed25519 signatures, multi-state `SenderKeyRecord` (rotation
+  keeps old chains decryptable, FIFO max 5) and skipped message keys for
+  out-of-order delivery (FIFO cap 2000, max forward jump 25 000).
 
 ## Legal / provenance
 
@@ -47,7 +50,7 @@ identity/     Ed25519 identity + Montgomery conversion, key generation helpers
 x3dh/         X3DH key agreement: initiator, responder, prekey bundle
 ratchet/      Double Ratchet: KDF chains, header, message AEAD, state machine
 session/      prekey message envelope, session record/builder/cipher
-sender-keys/  group messaging via Sender Keys (Phase 2)
+sender-keys/  Sender Keys: state, multi-state record, SKDM, group cipher
 store/        SignalProtocolStore interface + in-memory implementation
 index.ts      public API: SignalProtocolManager facade + KeyServerClient contract
 ```
@@ -64,8 +67,15 @@ index.ts      public API: SignalProtocolManager facade + KeyServerClient contrac
 - Trust model: TOFU (trust-on-first-use); an identity key change makes
   session establishment fail until the app clears the stored identity.
 - Concurrent session initiation (both sides initiate simultaneously) is
-  resolved naively — last processed handshake wins. Sesame handles this
-  properly in a future phase.
+  resolved with a deterministic tie-break — the LOWER X3DH base key wins on
+  both sides, so the pair converges on one session; the loser's first
+  payload is lost and surfaced as a decrypt error. Sesame replaces this in
+  a future phase.
+- Sender key rotation ADDS a chain to the sender's record instead of
+  replacing it, so in-flight messages survive the transition; chains are
+  evicted FIFO beyond 5. A replayed (legitimately signed) old SKDM can
+  re-add an evicted chain, making already-seen messages re-deliverable —
+  same trade-off as libsignal, acceptable because SKDMs are identity-signed.
 
 ## @noble v2 API notes (differ from v1 docs and BRIEF §6)
 

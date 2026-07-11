@@ -28,6 +28,8 @@ export const CHAIN_KEY_SEED = new Uint8Array([0x02]);
 export const MAX_SKIP = 1000;
 /** Global cap on stored skipped keys (FIFO eviction) to bound memory. */
 export const MAX_SKIPPED_KEYS_STORED = 2000;
+/** Max forward jump a sender-key chain accepts at once (libsignal's limit). */
+export const MAX_GROUP_SKIP = 25000;
 
 /** Wire format version of our message serialization. */
 export const WIRE_VERSION = 1;

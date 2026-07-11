@@ -9,7 +9,9 @@ import {
   type SerializedPreKeyBundle,
   type SerializedSKDM,
 } from '../index';
-import { verifySKDM } from '../sender-keys/sender-key-distribution';
+import { createSKDM, verifySKDM } from '../sender-keys/sender-key-distribution';
+import { SenderKeyState } from '../sender-keys/sender-key-state';
+import { generateIdentityKeyPair } from '../identity/identity-key';
 
 /**
  * Minimal fake key server: stores published keys per user and serves
@@ -173,11 +175,14 @@ describe('Group messaging (Sender Keys)', () => {
     await bob.processSenderKeyDistribution(groupId, 'alice', skdm);
   }
 
-  it('setupSenderKey stores a valid sender key state', async () => {
+  it('setupSenderKey stores a valid single-state sender key record', async () => {
     await alice.setupSenderKey('group1');
     const raw = await aliceStore.loadSenderKey('group1', 'alice');
     expect(raw).toBeDefined();
-    const state = JSON.parse(raw!);
+    const record = JSON.parse(raw!);
+    expect(record.version).toBe(1);
+    expect(record.states).toHaveLength(1);
+    const state = record.states[0];
     expect(state.iteration).toBe(0);
     expect(state.chainKey).toBeTypeOf('string');
     expect(state.distributionId).toBeTypeOf('string');
@@ -205,8 +210,9 @@ describe('Group messaging (Sender Keys)', () => {
 
     const raw = await bobStore.loadSenderKey('group1', 'alice');
     expect(raw).toBeDefined();
-    const state = JSON.parse(raw!);
-    expect(state.distributionId).toBe(skdm.distributionId);
+    const record = JSON.parse(raw!);
+    expect(record.states).toHaveLength(1);
+    expect(record.states[0].distributionId).toBe(skdm.distributionId);
   });
 
   it('encryptGroupMessage and decryptGroupMessage round-trip between Alice and Bob', async () => {
@@ -240,17 +246,24 @@ describe('Group messaging (Sender Keys)', () => {
     ).rejects.toThrow('Invalid SKDM signature');
   });
 
-  it('rotated sender key: old messages rejected under new distributionId', async () => {
+  it('rotation: new chain used for new messages, old chain still decrypts in-flight ones', async () => {
     await aliceSendsSKDMToBob('group1');
-    const msg1 = await alice.encryptGroupMessage('group1', 'first');
-    expect(await bob.decryptGroupMessage('group1', msg1)).toBe('first');
+    const before = await alice.encryptGroupMessage('group1', 'sent before rotation');
 
     // Rotate Alice's key and re-distribute to Bob.
     const newSkdm = await alice.rotateSenderKey('group1');
     await bob.processSenderKeyDistribution('group1', 'alice', newSkdm);
 
-    // Old message (signed under the previous distributionId) must be rejected.
-    await expect(bob.decryptGroupMessage('group1', msg1)).rejects.toThrow('Distribution mismatch');
+    const after = await alice.encryptGroupMessage('group1', 'sent after rotation');
+    expect(after.distributionId).toBe(newSkdm.distributionId);
+    expect(before.distributionId).not.toBe(newSkdm.distributionId);
+
+    // Both decrypt: the record keeps the pre-rotation chain alive (transition).
+    expect(await bob.decryptGroupMessage('group1', after)).toBe('sent after rotation');
+    expect(await bob.decryptGroupMessage('group1', before)).toBe('sent before rotation');
+
+    // Replay of the old-chain message is still rejected.
+    await expect(bob.decryptGroupMessage('group1', before)).rejects.toThrow('already processed');
   });
 
   it('two independent groups do not interfere', async () => {
@@ -263,8 +276,37 @@ describe('Group messaging (Sender Keys)', () => {
     expect(await bob.decryptGroupMessage('group1', msg1)).toBe('hello group1');
     expect(await bob.decryptGroupMessage('group2', msg2)).toBe('hello group2');
 
-    // Cross-group: group1's stored key has a different distributionId than msg2's.
-    await expect(bob.decryptGroupMessage('group1', msg2)).rejects.toThrow('Distribution mismatch');
-    await expect(bob.decryptGroupMessage('group2', msg1)).rejects.toThrow('Distribution mismatch');
+    // Cross-group: group1's record has no state for msg2's distributionId.
+    await expect(bob.decryptGroupMessage('group1', msg2)).rejects.toThrow(
+      'No sender key state for distribution',
+    );
+    await expect(bob.decryptGroupMessage('group2', msg1)).rejects.toThrow(
+      'No sender key state for distribution',
+    );
+  });
+
+  it('TOFU: rejects an SKDM claiming a sender whose identity is already pinned', async () => {
+    // Bob pins Alice's real identity by processing her genuine SKDM first.
+    await aliceSendsSKDMToBob('group1');
+
+    // Mallory forges an SKDM claiming senderId "alice", signed by HER identity.
+    const mallory = generateIdentityKeyPair();
+    const forged = createSKDM(
+      'alice',
+      SenderKeyState.create(),
+      mallory.ed.privateKey,
+      mallory.ed.publicKey,
+    );
+    // The SKDM itself is internally valid (signed by its own identity key)…
+    expect(verifySKDM(forged, mallory.ed.publicKey)).toBe(true);
+
+    // …but Bob verifies against the PINNED identity for "alice" → rejected.
+    await expect(
+      bob.processSenderKeyDistribution('group1', 'alice', forged),
+    ).rejects.toThrow('Invalid SKDM signature');
+
+    // Alice's genuine chain is untouched.
+    const msg = await alice.encryptGroupMessage('group1', 'still alice');
+    expect(await bob.decryptGroupMessage('group1', msg)).toBe('still alice');
   });
 });

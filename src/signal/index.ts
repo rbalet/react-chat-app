@@ -19,7 +19,7 @@ import { DEFAULT_PREKEY_BATCH_SIZE } from './core/constants';
 import { base64ToBytes, bytesToBase64 } from './core/utils';
 import type { EncryptedMessage } from './core/types';
 import type { SignalProtocolStore } from './store/store-interface';
-import { SenderKeyState } from './sender-keys/sender-key-state';
+import { SenderKeyRecord } from './sender-keys/sender-key-record';
 import { GroupCipher, type GroupMessage } from './sender-keys/group-cipher';
 import type { SerializedSKDM } from './sender-keys/sender-key-distribution';
 
@@ -186,11 +186,11 @@ export class SignalProtocolManager {
   // Group messaging (Sender Keys)
   // ---------------------------------------------------------------------------
 
-  /** Create a fresh SenderKeyState for this user in a group. */
+  /** Create a fresh sender key record for this user in a group. */
   async setupSenderKey(groupId: string): Promise<void> {
     return this.runGroupExclusive(groupId, async () => {
-      const state = SenderKeyState.create();
-      await this.store.storeSenderKey(groupId, this.userId, JSON.stringify(state.serialize()));
+      const record = SenderKeyRecord.create();
+      await this.store.storeSenderKey(groupId, this.userId, JSON.stringify(record.serialize()));
     });
   }
 

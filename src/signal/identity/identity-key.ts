@@ -4,8 +4,7 @@
  * The long-term identity is an Ed25519 key pair. The published identity is
  * the Ed25519 public key; peers convert it to X25519 (Montgomery) when they
  * need it for X3DH DH computations. Our own X25519 form is derived once and
- * kept alongside (see BRIEF.md §6 — this replaces XEdDSA, as libsignal does
- * in practice).
+ * kept alongside (this replaces XEdDSA, as libsignal does in practice).
  */
 
 import { edPrivateToX, edPublicToX, generateSigningKeyPair } from '../core/crypto';

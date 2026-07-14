@@ -3,7 +3,7 @@
  * @noble directly. Everything above works with these named operations,
  * which keeps the mapping to the specs auditable in one place.
  *
- * Primitive choices (BRIEF.md §6):
+ * Primitive choices:
  *  - DH:        X25519 (RFC 7748)
  *  - Signature: Ed25519 (RFC 8032), identity key converted to Montgomery for DH
  *  - KDF:       HKDF-SHA256 / HMAC-SHA256

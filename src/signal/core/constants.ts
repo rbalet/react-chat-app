@@ -1,5 +1,5 @@
 /**
- * Protocol constants — see BRIEF.md §13.
+ * Protocol constants.
  *
  * The HKDF info strings are application-chosen (X3DH spec §2.1 leaves them
  * to the implementer). They are deliberately distinct from Signal's own,

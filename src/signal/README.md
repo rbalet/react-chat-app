@@ -4,10 +4,6 @@ Clean-room TypeScript implementation of the **Signal Protocol** — X3DH,
 Double Ratchet, Sender Keys (groups) — written from the public-domain
 specifications at <https://signal.org/docs/>.
 
-> Developed inside `react-chat-app` (Phase 1), to be extracted to its own
-> repo and published on npm (Phase 3). See `BRIEF.md` at the repo root for
-> the full plan.
-
 ## Status
 
 - ✅ Phase 1: core crypto, X3DH, Double Ratchet, sessions, store, facade —

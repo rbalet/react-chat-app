@@ -29,9 +29,9 @@ and log in as `Alice` and `Bob` to chat.
 | `pnpm run dev:all` | Start DB (Docker), backend API, and frontend in one terminal |
 | `pnpm run test` | Run all 102 frontend tests (Vitest) |
 | `cd backend && pnpm run test` | Run 13 backend tests (supertest, needs Docker) |
-| `pnpm run smoke:group` | Smoke test: 4 users, group chat, encryption, rotation, departure/return (31 scenarios) |
+| `pnpm run smoke:group` | Smoke test: 4 users, group chat, encryption, rotation, departure/return (28 checks) |
 | `pnpm run db:inspect` | Show prekey tables (who's registered, OPK counts) |
-| `pnpm run db:verify` | Show last 10 chat messages with encrypted/plaintext status |
+| `pnpm run db:verify` | Same as inspect, with descriptive labels |
 | `pnpm run db:clean` | Wipe prekey bundles between test runs (fast, keeps users) |
 | `pnpm run db:reset` | Full DB reset (destroy volume + recreate) |
 
@@ -104,7 +104,7 @@ backend suite proves atomic OPK consumption under concurrency.
 - ✅ Phase 1 — X3DH + Double Ratchet + sessions + stores + facade; backend prekey server; verified end-to-end across two isolated clients.
 - ✅ Phase 2 — Sender Keys: identity-signed SKDMs, per-message signatures, multi-state rotation, skipped message keys.
 - ✅ Audit — adversarial code review, edge case audit, full libsignal comparison. Critical fixes applied: identity binding, domain separators, rollback patterns, SKDM replay guard.
-- ✅ Smoke test — 31 scenarios: 4 users, group chat, rotation, departure/return (0 failures).
+- ✅ Smoke test — 28 checks: 4 users, group chat, rotation, departure/return (0 failures).
 - ✅ Module extracted to npm package `@up4it/signal-protocol` (Apache-2.0, 97 tests).
 
 ## Gaps deferred

@@ -1,8 +1,7 @@
 # signal-poc-backend
 
 Minimal Express backend for the Signal Protocol PoC: PostgreSQL-backed
-prekey server + stateless WebSocket relay. Replaces the localStorage dummy
-key server of the frontend (see `BRIEF.md` §9 at the repo root).
+prekey server + stateless WebSocket relay.
 
 ## Run
 

@@ -12,7 +12,7 @@
     "dev:backend": "cd backend && docker compose up -d && pnpm run dev",
     "dev:all": "concurrently -n db,api,app -c cyan,green,yellow \"docker compose -f backend/docker-compose.yml up -d\" \"cd backend && pnpm run dev\" \"pnpm run dev\"",
     "db:inspect": "cd backend && docker exec -i backend-postgres-1 psql -U postgres -d signal_poc -c \"SELECT user_id, registration_id FROM prekey_bundle;\" -c \"SELECT user_id, count(*) AS opk_count FROM one_time_prekey GROUP BY user_id;\"",
-    "db:verify": "cd backend && docker exec -i backend-postgres-1 psql -U postgres -d signal_poc -c \"SELECT id, content, CASE WHEN ciphertext IS NOT NULL THEN 'ENCRYPTED' ELSE 'PLAINTEXT' END AS status FROM chat_message ORDER BY created_at DESC LIMIT 10;\"",
+    "db:verify": "cd backend && docker exec -i backend-postgres-1 psql -U postgres -d signal_poc -c \"SELECT 'Prekey bundles:' AS info;\" -c \"SELECT user_id, registration_id FROM prekey_bundle;\" -c \"SELECT 'OPK pools:' AS info;\" -c \"SELECT user_id, count(*) AS remaining FROM one_time_prekey GROUP BY user_id;\" -c \"SELECT 'Messages are NOT stored (WS relay only).' AS note;\"",
     "db:reset": "cd backend && docker compose down -v && docker compose up -d",
     "db:clean": "cd backend && docker exec -i backend-postgres-1 psql -U postgres -d signal_poc -c \"DELETE FROM one_time_prekey; DELETE FROM prekey_bundle;\"",
     "build": "tsc --noEmit && vite build",

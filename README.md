@@ -4,12 +4,7 @@ A React chat application whose end-to-end encryption is a **clean-room
 TypeScript implementation of the Signal Protocol** — X3DH, Double Ratchet
 and Sender Keys (groups) — living in [`src/signal/`](src/signal/README.md),
 built exclusively on [`@noble`](https://paulmillr.com/noble/) crypto and
-licensed **Apache-2.0**. No code from `libsignal` (AGPL/GPL) is used.
-
-**[BRIEF.md](BRIEF.md)** is the project's source of truth (context, legal
-constraints, design, phase plan). The protocol module is developed here
-(Phases 0–2, done) and will be extracted to its own npm package
-(`@up4it/signal-protocol`, Phase 3).
+licensed **Apache-2.0**.
 
 ## Quick start
 
@@ -112,16 +107,15 @@ backend suite proves atomic OPK consumption under concurrency.
 - ✅ Smoke test — 31 scenarios: 4 users, group chat, rotation, departure/return (0 failures).
 - ✅ Module extracted to npm package `@up4it/signal-protocol` (Apache-2.0, 97 tests).
 
-## Gaps deferred (Phase 3 / up4it)
+## Gaps deferred
 
-| Gap | Why deferred | Target |
-| --- | ------------ | ------ |
-| SPK rotation + OPK pool replenishment | PoC doesn't need long-lived keys | Phase 3 (up4it NestJS backend) |
-| Archived sessions (multi-device Sesame) | Requires per-device session storage | Phase 3 |
-| Rate limiting on `GET /keys/:userId` | OPK draining prevention | Production |
-| Offline message queue | Messages dropped for offline users | Production |
-| Auth on prekey endpoints | PoC trusts all clients on localhost | Production |
-| React 17 UI (demo shell) | Only the signal module is production-ready | Not for production |
+| Gap | Why deferred |
+| --- | ------------ |
+| SPK rotation + OPK pool replenishment | PoC doesn't need long-lived keys |
+| Archived sessions (multi-device) | Requires per-device session storage |
+| Rate limiting + auth on prekey endpoints | PoC trusts all clients on localhost |
+| Offline message queue | Messages dropped for offline users |
+| React 17 UI (demo shell) | Only the signal module is production-ready |
 
 ## License & provenance
 

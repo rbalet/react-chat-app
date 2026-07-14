@@ -1,13 +1,12 @@
-/**
+/*
  * Smoke test — Group messaging (Sender Keys).
  *
- * Simulates a group of 4 members (Alice, Bob, Carol, Dave). Alice creates the
- * group, distributes her sender key, and everyone exchanges messages. Carol
- * leaves: Alice rotates her key. Carol returns — she cannot read new messages
- * until she receives the rotated key.
+ * Simulates a group of 4 members (Alice, Bob, Carol, Dave). Alice creates
+ * the group, distributes her sender key, and everyone exchanges messages.
+ * Carol leaves: Alice rotates her key. Carol returns — she cannot read new
+ * messages until she receives the rotated key.
  *
- * Usage:  node smoke-group.mjs
- *         or: pnpm install && pnpm run test:smoke
+ * Usage:  pnpm run smoke:group
  */
 
 import {
@@ -73,7 +72,11 @@ async function createMember(name, server) {
 // ---------------------------------------------------------------------------
 // Scenario
 // ---------------------------------------------------------------------------
-console.log("\n=== Sender Keys group smoke test ===\n");
+console.log("╔══════════════════════════════════════╗");
+console.log("║  Sender Keys — Group Smoke Test     ║");
+console.log("║  4 members · encrypt · rotate ·     ║");
+console.log("║  departure · return                 ║");
+console.log("╚══════════════════════════════════════╝");
 
 const server = new SmokeKeyServer();
 
@@ -158,43 +161,70 @@ await bob.manager.processSenderKeyDistribution(GROUP, "alice", newAliceSKDM);
 await dave.manager.processSenderKeyDistribution(GROUP, "alice", newAliceSKDM);
 console.log(`  ${PASS} New key distributed to Bob and Dave (Carol excluded)`);
 
-// Alice sends new message after rotation
+// Alice sends new message after rotation — Bob and Dave can read, Carol cannot.
+console.log("\n7. After rotation, Alice sends 'Post-rotation message'...");
 const msgAfterRotate = await alice.manager.encryptGroupMessage(GROUP, "Post-rotation message");
 const bobDecrypted = await bob.manager.decryptGroupMessage(GROUP, msgAfterRotate);
-ok("Bob decrypts post-rotation: " + bobDecrypted,
+ok("Bob decrypts: " + bobDecrypted,
   () => { if (bobDecrypted !== "Post-rotation message") throw new Error(); });
 
 const daveDecrypted = await dave.manager.decryptGroupMessage(GROUP, msgAfterRotate);
-ok("Dave decrypts post-rotation: " + daveDecrypted,
+ok("Dave decrypts: " + daveDecrypted,
   () => { if (daveDecrypted !== "Post-rotation message") throw new Error(); });
 
-// Carol should NOT be able to decrypt (she didn't get the new SKDM)
+// Carol should NOT be able to decrypt — she didn't get the rotated key
 let carolRotateErr = null;
 try {
   await carol.manager.decryptGroupMessage(GROUP, msgAfterRotate);
 } catch (e) {
   carolRotateErr = e.message;
 }
-ok("Carol rejected (no rotated key)", () => {
+ok("Carol rejected (no rotated key — she is still excluded)", () => {
   if (!carolRotateErr) throw new Error("Carol should not be able to decrypt");
 });
 
-// 8. Carol returns — gets the rotated key and can read new messages
+// The group keeps chatting while Carol is away.
+// Alice sends more messages with her ROTATED key — Carol cannot read them.
+console.log("\n7.5 Group keeps chatting while Carol is away...");
+const msgWhileAway1 = await alice.manager.encryptGroupMessage(GROUP, "Where did Carol go?");
+const msgWhileAway2 = await alice.manager.encryptGroupMessage(GROUP, "She left the moment.");
+ok("Alice sends 2 messages with rotated key", () => {});
+// Carol cannot read these (still excluded, no rotated Alice key)
+let carolAwayErr = null;
+try { await carol.manager.decryptGroupMessage(GROUP, msgWhileAway1); }
+catch (e) { carolAwayErr = e.message; }
+ok("Carol cannot read 'Where did Carol go?' (still excluded)", () => {
+  if (!carolAwayErr) throw new Error("Carol should not decrypt while excluded");
+});
+
+// 8. Carol returns — gets the rotated key and can read ALL messages
+// from the current chain, including those sent while she was away.
+// (SenderKeyRecord keeps the new distributionId; once Carol has it,
+// she can decrypt any message encrypted under it.)
 console.log("\n8. Carol returns, receives rotated SKDM...");
 await carol.manager.processSenderKeyDistribution(GROUP, "alice", newAliceSKDM);
+
+// Carol can now read the missed messages (must decrypt in iteration order).
+const carolMissed1 = await carol.manager.decryptGroupMessage(GROUP, msgAfterRotate);
+ok("Carol reads: \"" + carolMissed1 + "\"", () => { if (carolMissed1 !== "Post-rotation message") throw new Error(); });
+const carolMissed2 = await carol.manager.decryptGroupMessage(GROUP, msgWhileAway1);
+ok("Carol reads: \"" + carolMissed2 + "\"", () => { if (carolMissed2 !== "Where did Carol go?") throw new Error(); });
+const carolMissed3 = await carol.manager.decryptGroupMessage(GROUP, msgWhileAway2);
+ok("Carol reads: \"" + carolMissed3 + "\"", () => { if (carolMissed3 !== "She left the moment.") throw new Error(); });
+
+// New messages after return work normally
 const nextMsg = await alice.manager.encryptGroupMessage(GROUP, "Welcome back Carol!");
 const carolBack = await carol.manager.decryptGroupMessage(GROUP, nextMsg);
-ok("Carol decrypts after receiving rotated key: " + carolBack,
+ok("Carol reads new message: \"" + carolBack + "\"",
   () => { if (carolBack !== "Welcome back Carol!") throw new Error(); });
 
-// 9. After receiving the rotated key, Carol CAN read the post-rotation
-// message she missed (SenderKeyRecord keeps old states for transition).
-// The security property is: Carol could NOT read it BEFORE step 8.
-console.log("\n9. After receiving rotated key, Carol reads the message she missed...");
-const carolMissed = await carol.manager.decryptGroupMessage(GROUP, msgAfterRotate);
-ok("Carol CAN read missed message after rotation key: " + carolMissed,
-  () => { if (carolMissed !== "Post-rotation message") throw new Error(); });
-
 // ---------------------------------------------------------------------------
-console.log(`\n${failures === 0 ? PASS : FAIL} ${failures} failure(s) total\n`);
+const total = 4 /*create*/ + 1 /*SKDM*/ + 3 /*dist*/ + 3 /*msg1*/ + 2 /*replies*/
+  + 1 /*dave err*/ + 1 /*dave ok*/ + 3 /*rotate+dist*/ + 3 /*post-rotate*/ + 1 /*away-ok*/
+  + 2 /*away-reject*/ + 3 /*carol miss*/ + 1 /*carol back*/;
+console.log(
+  `\n${failures === 0 ? "╔══════════════════════════╗\n║" : "╔══════════════════════════╗\n║"}` +
+  `  ${failures === 0 ? "  ALL SCENARIOS PASS  " : `  ${failures} FAILURE(S)         `}  ║\n` +
+  "╚══════════════════════════╝"
+);
 process.exitCode = failures > 0 ? 1 : 0;

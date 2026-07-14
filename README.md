@@ -1,5 +1,7 @@
 # Secure Chat PoC — from-scratch Signal Protocol in TypeScript
 
+> ⚠️ Prototype — Not for production use.
+
 A React chat application whose end-to-end encryption is a **clean-room
 TypeScript implementation of the Signal Protocol** — X3DH, Double Ratchet
 and Sender Keys (groups) — living in [`src/signal/`](src/signal/README.md),

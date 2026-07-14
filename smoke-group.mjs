@@ -161,8 +161,8 @@ await bob.manager.processSenderKeyDistribution(GROUP, "alice", newAliceSKDM);
 await dave.manager.processSenderKeyDistribution(GROUP, "alice", newAliceSKDM);
 console.log(`  ${PASS} New key distributed to Bob and Dave (Carol excluded)`);
 
-// Alice sends new message after rotation — Bob and Dave can read, Carol cannot.
-console.log("\n7. After rotation, Alice sends 'Post-rotation message'...");
+// 8. Post-rotation: Bob and Dave can read, Carol cannot.
+console.log("\n8. Post-rotation: Alice sends 'Post-rotation message'...");
 const msgAfterRotate = await alice.manager.encryptGroupMessage(GROUP, "Post-rotation message");
 const bobDecrypted = await bob.manager.decryptGroupMessage(GROUP, msgAfterRotate);
 ok("Bob decrypts: " + bobDecrypted,
@@ -183,9 +183,9 @@ ok("Carol rejected (no rotated key — she is still excluded)", () => {
   if (!carolRotateErr) throw new Error("Carol should not be able to decrypt");
 });
 
-// The group keeps chatting while Carol is away.
+// 9. Group keeps chatting while Carol is away.
 // Alice sends more messages with her ROTATED key — Carol cannot read them.
-console.log("\n7.5 Group keeps chatting while Carol is away...");
+console.log("\n9. Group keeps chatting while Carol is away...");
 const msgWhileAway1 = await alice.manager.encryptGroupMessage(GROUP, "Where did Carol go?");
 const msgWhileAway2 = await alice.manager.encryptGroupMessage(GROUP, "She left the moment.");
 ok("Alice sends 2 messages with rotated key", () => {});
@@ -197,11 +197,11 @@ ok("Carol cannot read 'Where did Carol go?' (still excluded)", () => {
   if (!carolAwayErr) throw new Error("Carol should not decrypt while excluded");
 });
 
-// 8. Carol returns — gets the rotated key and can read ALL messages
+// 10. Carol returns — gets the rotated key and can read ALL messages
 // from the current chain, including those sent while she was away.
 // (SenderKeyRecord keeps the new distributionId; once Carol has it,
 // she can decrypt any message encrypted under it.)
-console.log("\n8. Carol returns, receives rotated SKDM...");
+console.log("\n10. Carol returns, receives rotated SKDM...");
 await carol.manager.processSenderKeyDistribution(GROUP, "alice", newAliceSKDM);
 
 // Carol can now read the missed messages (must decrypt in iteration order).

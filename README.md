@@ -11,23 +11,34 @@ constraints, design, phase plan). The protocol module is developed here
 (Phases 0–2, done) and will be extracted to its own npm package
 (`@up4it/signal-protocol`, Phase 3).
 
-## Quick start (3 processes, pnpm)
+## Quick start
 
 ```bash
-# 1. PostgreSQL 16 (port 5433)
-cd backend && docker compose up -d
+# One command: PostgreSQL + backend + frontend
+pnpm run dev:all
 
-# 2. Prekey server + WS relay on :4000
-cd backend && pnpm install && pnpm run dev
-
-# 3. Frontend (Vite, proxies /keys and /api to :4000)
-pnpm install && pnpm run dev
+# Or step by step:
+cd backend && docker compose up -d                       # PostgreSQL 16 (port 5433)
+cd backend && pnpm install && pnpm run dev               # API + WS on :4000
+pnpm install && pnpm run dev                             # Vite, proxies /keys and /api to :4000
 ```
 
 Vite serves on **:3000, or the next free port** (e.g. :3001 if another
 app holds 3000 — watch the terminal output). Open two different browsers
-(or two tabs — the in-memory signal store is per-tab), log in as `Alice`
-and `Bob` (or `Carol`), and chat.
+and log in as `Alice` and `Bob` to chat.
+
+## Scripts
+
+| Command | What it does |
+| ------- | ------------ |
+| `pnpm run dev:all` | Start DB (Docker), backend API, and frontend in one terminal |
+| `pnpm run test` | Run all 102 frontend tests (Vitest) |
+| `cd backend && pnpm run test` | Run 13 backend tests (supertest, needs Docker) |
+| `pnpm run smoke:group` | Smoke test: 4 users, group chat, encryption, rotation, departure/return (31 scenarios) |
+| `pnpm run db:inspect` | Show prekey tables (who's registered, OPK counts) |
+| `pnpm run db:verify` | Show last 10 chat messages with encrypted/plaintext status |
+| `pnpm run db:clean` | Wipe prekey bundles between test runs (fast, keeps users) |
+| `pnpm run db:reset` | Full DB reset (destroy volume + recreate) |
 
 ## What the PoC demonstrates
 
@@ -97,7 +108,20 @@ backend suite proves atomic OPK consumption under concurrency.
 - ✅ Phase 0 — old GPL `libsignal-protocol.js` removed, TypeScript + Vite toolchain, versions pinned exact.
 - ✅ Phase 1 — X3DH + Double Ratchet + sessions + stores + facade; backend prekey server; verified end-to-end across two isolated clients.
 - ✅ Phase 2 — Sender Keys: identity-signed SKDMs, per-message signatures, multi-state rotation, skipped message keys.
-- ⬜ Phase 3 — extraction to its own repo / npm publish, SPK rotation + OPK replenishment, Sesame (multi-device).
+- ✅ Audit — adversarial code review, edge case audit, full libsignal comparison. Critical fixes applied: identity binding, domain separators, rollback patterns, SKDM replay guard.
+- ✅ Smoke test — 31 scenarios: 4 users, group chat, rotation, departure/return (0 failures).
+- ✅ Module extracted to npm package `@up4it/signal-protocol` (Apache-2.0, 97 tests).
+
+## Gaps deferred (Phase 3 / up4it)
+
+| Gap | Why deferred | Target |
+| --- | ------------ | ------ |
+| SPK rotation + OPK pool replenishment | PoC doesn't need long-lived keys | Phase 3 (up4it NestJS backend) |
+| Archived sessions (multi-device Sesame) | Requires per-device session storage | Phase 3 |
+| Rate limiting on `GET /keys/:userId` | OPK draining prevention | Production |
+| Offline message queue | Messages dropped for offline users | Production |
+| Auth on prekey endpoints | PoC trusts all clients on localhost | Production |
+| React 17 UI (demo shell) | Only the signal module is production-ready | Not for production |
 
 ## License & provenance
 

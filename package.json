@@ -9,10 +9,17 @@
   "scripts": {
     "start": "vite",
     "dev": "vite",
+    "dev:backend": "cd backend && docker compose up -d && pnpm run dev",
+    "dev:all": "concurrently -n db,api,app -c cyan,green,yellow \"docker compose -f backend/docker-compose.yml up -d\" \"cd backend && pnpm run dev\" \"pnpm run dev\"",
+    "db:inspect": "cd backend && docker exec -i backend-postgres-1 psql -U postgres -d signal_poc -c \"SELECT user_id, registration_id FROM prekey_bundle;\" -c \"SELECT user_id, count(*) AS opk_count FROM one_time_prekey GROUP BY user_id;\"",
+    "db:verify": "cd backend && docker exec -i backend-postgres-1 psql -U postgres -d signal_poc -c \"SELECT id, content, CASE WHEN ciphertext IS NOT NULL THEN 'ENCRYPTED' ELSE 'PLAINTEXT' END AS status FROM chat_message ORDER BY created_at DESC LIMIT 10;\"",
+    "db:reset": "cd backend && docker compose down -v && docker compose up -d",
+    "db:clean": "cd backend && docker exec -i backend-postgres-1 psql -U postgres -d signal_poc -c \"DELETE FROM one_time_prekey; DELETE FROM prekey_bundle;\"",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "smoke:group": "tsx smoke-group.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -29,6 +36,8 @@
     "@types/react": "17.0.93",
     "@types/react-dom": "17.0.26",
     "@vitejs/plugin-react": "6.0.3",
+    "concurrently": "10.0.3",
+    "tsx": "4.23.1",
     "typescript": "5.9.3",
     "vite": "8.1.4",
     "vitest": "4.1.10"
